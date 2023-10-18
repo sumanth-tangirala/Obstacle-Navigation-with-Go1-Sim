@@ -274,6 +274,7 @@ class Runner:
 
         frames = self.env.get_complete_frames()
         if len(frames) > 0:
+            print('pausing 1')
             self.env.pause_recording()
             print("LOGGING VIDEO")
             logger.save_video(frames, f"videos/{it:05d}.mp4", fps=1 / self.env.dt)

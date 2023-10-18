@@ -130,15 +130,15 @@ class Cfg(PrefixProto, cli=False):
         distribution_update_extension_distance = 1
         curriculum_seed = 100
 
-        lin_vel_x = [-1.0, 1.0]  # min max [m/s]
-        lin_vel_y = [-1.0, 1.0]  # min max [m/s]
-        ang_vel_yaw = [-1, 1]  # min max [rad/s]
+        lin_vel_x = [-.5, .5]  # min max [m/s]
+        lin_vel_y = [-.5, .5]  # min max [m/s]
+        ang_vel_yaw = [-.5, .5]  # min max [rad/s]
         body_height_cmd = [-0.05, 0.05]
         impulse_height_commands = False
 
-        limit_vel_x = [-10.0, 10.0]
-        limit_vel_y = [-0.6, 0.6]
-        limit_vel_yaw = [-10.0, 10.0]
+        limit_vel_x = [-.5, .5]
+        limit_vel_y = [-0.5, 0.5]
+        limit_vel_yaw = [-.5, .5]
         limit_body_height = [-0.05, 0.05]
         limit_gait_phase = [0, 0.01]
         limit_gait_offset = [0, 0.01]

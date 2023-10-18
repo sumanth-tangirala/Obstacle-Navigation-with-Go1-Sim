@@ -72,8 +72,8 @@ def config_go1(Cnfg: Union[Cfg, Meta]):
     _.num_envs = 4000
 
     _ = Cnfg.commands
-    _.lin_vel_x = [-1.0, 1.0]
-    _.lin_vel_y = [-1.0, 1.0]
+    _.lin_vel_x = [-.5, .5]
+    _.lin_vel_y = [-.5, .5]
 
     _ = Cnfg.commands
     _.heading_command = False
@@ -81,8 +81,8 @@ def config_go1(Cnfg: Union[Cfg, Meta]):
     _.command_curriculum = True
     _.num_lin_vel_bins = 30
     _.num_ang_vel_bins = 30
-    _.lin_vel_x = [-0.6, 0.6]
-    _.lin_vel_y = [-0.6, 0.6]
+    _.lin_vel_x = [-.5, .5]
+    _.lin_vel_y = [-.5, .5]
     _.ang_vel_yaw = [-1, 1]
 
     _ = Cnfg.domain_rand
