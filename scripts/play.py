@@ -211,7 +211,6 @@ def play_go1(headless=True):
 
     logger.save_video(env.video_frames, "videos/plan.mp4", fps=1 / env.dt)
 
-    breakpoint()
 
     # plot target and measured forward velocity
     from matplotlib import pyplot as plt
