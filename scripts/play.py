@@ -104,7 +104,7 @@ def play_go1(headless=True):
 
     env, policy = load_env(label, headless)
 
-    num_eval_steps = 250
+    num_eval_steps = 500
     gaits = {"pronking": [0, 0, 0],
              "trotting": [0.5, 0, 0],
              "bounding": [0, 0.5, 0],
