@@ -68,3 +68,6 @@ docker/rsc
 *.jit
 tmp
 *.tar
+
+.autoenv.zsh
+.autoenv_leave.zsh

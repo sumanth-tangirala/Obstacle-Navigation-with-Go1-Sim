@@ -35,10 +35,17 @@ def load_policy(logdir):
 
 
 def load_env(label, headless):
-    dirs = glob.glob(os.path.join(os.path.dirname(__file__), f"../runs/{label}/*"))
-    logdir = sorted(dirs)[0]
+    try:
+        contents = os.listdir(label)
+    except:
+        contents = []
+    if 'parameters.pkl' not in contents:
+        dirs = glob.glob(os.path.join(os.path.dirname(__file__), f"../runs/{label}/*"))
+        logdir = sorted(dirs)[0]
+    else:
+        logdir = label
 
-    with open(logdir + "/parameters.pkl", 'rb') as file:
+    with open(os.path.join(logdir, "parameters.pkl"), 'rb') as file:
         pkl_cfg = pkl.load(file)
         print(pkl_cfg.keys())
         cfg = pkl_cfg["Cfg"]
@@ -100,7 +107,7 @@ def play_go1(headless=True):
     import glob
     import os
 
-    label = "gait-conditioned-agility/pretrain-v0/train"
+    label = "/gait-conditioned-agility/pretrain-v0"
 
     env, policy = load_env(label, headless)
 
@@ -168,8 +175,6 @@ def play_go1(headless=True):
     env.start_recording()
     env.record_now = True
     env.complete_video_frames = []
-
-    print('Recording:', env.record_now)
 
     obs = env.reset()
 
