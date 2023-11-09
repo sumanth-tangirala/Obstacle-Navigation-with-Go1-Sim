@@ -109,6 +109,8 @@ class LeggedRobot(BaseTask):
         self.base_ang_vel[:] = quat_rotate_inverse(self.base_quat, self.root_states[:self.num_envs, 10:13])
         self.projected_gravity[:] = quat_rotate_inverse(self.base_quat, self.gravity_vec)
 
+        # breakpoint()
+
         self.foot_velocities = self.rigid_body_state.view(self.num_envs, self.num_bodies, 13
                                                           )[:, self.feet_indices, 7:10]
         self.foot_positions = self.rigid_body_state.view(self.num_envs, self.num_bodies, 13)[:, self.feet_indices,
@@ -146,6 +148,8 @@ class LeggedRobot(BaseTask):
             self.body_height_buf = torch.mean(self.root_states[:, 2].unsqueeze(1) - self.measured_heights, dim=1) \
                                    < self.cfg.rewards.terminal_body_height
             self.reset_buf = torch.logical_or(self.body_height_buf, self.reset_buf)
+
+            self.reset_buf = self.reset_buf[:1]
 
     def reset_idx(self, env_ids):
         """ Reset some environments.
@@ -1573,6 +1577,25 @@ class LeggedRobot(BaseTask):
             self.gym.set_actor_rigid_body_properties(env_handle, anymal_handle, body_props, recomputeInertia=True)
             self.envs.append(env_handle)
             self.actor_handles.append(anymal_handle)
+
+            spacing = 1.8
+            env_lower = gymapi.Vec3(-spacing, 0.0, -spacing)
+            env_upper = gymapi.Vec3(spacing, spacing, spacing)
+            env_handle1 = self.gym.create_env(self.sim, env_lower, env_upper, int(np.sqrt(1)))
+            asset_options = gymapi.AssetOptions()
+            asset_options.disable_gravity = True
+            asset_options.fix_base_link = True
+            asset_box = self.gym.create_box(self.sim, 20, 10, 0.5, asset_options)
+            pose = gymapi.Transform()
+            pose.p = gymapi.Vec3(0.0, 0.5, 0.0)
+            pose.r = gymapi.Quat(0, 0, 0, 1)
+            box_handle = self.gym.create_actor(env_handle1, asset_box, pose, "actor1", i, 0)
+            self.actor_handles.append(box_handle)
+            shape_props = self.gym.get_actor_rigid_shape_properties(env_handle1, box_handle)
+            shape_props[0].restitution = 1
+            shape_props[0].compliance = 0.5
+            self.gym.set_actor_rigid_shape_properties(env_handle1, box_handle, shape_props)
+            
 
         self.feet_indices = torch.zeros(len(feet_names), dtype=torch.long, device=self.device, requires_grad=False)
         for i in range(len(feet_names)):

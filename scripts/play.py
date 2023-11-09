@@ -1,6 +1,10 @@
 import isaacgym
 
 assert isaacgym
+
+import os
+os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
+
 import torch
 import numpy as np
 
@@ -107,7 +111,7 @@ def play_go1(headless=True):
     import glob
     import os
 
-    label = "/gait-conditioned-agility/pretrain-v0"
+    label = "gait-conditioned-agility/pretrain-v0/train"
 
     env, policy = load_env(label, headless)
 
