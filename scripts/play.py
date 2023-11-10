@@ -185,6 +185,7 @@ def play_go1(headless=True):
     for i in tqdm(range(num_eval_steps)):
         with torch.no_grad():
             actions = policy(obs)
+            actions = torch.zeros_like(actions)
         env.commands[:, 0] = x_vel_cmd
         env.commands[:, 1] = y_vel_cmd
         env.commands[:, 2] = yaw_vel_cmd
