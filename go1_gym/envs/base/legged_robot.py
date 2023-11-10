@@ -49,7 +49,7 @@ class LeggedRobot(BaseTask):
         if not self.headless:
             print(self.env_origins[0])
             position = self.env_origins[0] + torch.tensor([0,0,5]).to(self.device)
-            lookat = position + torch.tensor([0,0.1,-3]).to(self.device)
+            lookat = position + torch.tensor([0,-0.1,-3]).to(self.device)
 
             self.set_camera(position, lookat)
         self._init_buffers()
@@ -112,8 +112,6 @@ class LeggedRobot(BaseTask):
         self.base_lin_vel[:] = quat_rotate_inverse(self.base_quat, self.root_states[self.robot_actor_idxs, 7:10])
         self.base_ang_vel[:] = quat_rotate_inverse(self.base_quat, self.root_states[self.robot_actor_idxs, 10:13])
         self.projected_gravity[:] = quat_rotate_inverse(self.base_quat, self.gravity_vec)
-
-        # breakpoint()
 
         self.foot_velocities = self.rigid_body_state.view(self.num_envs, self.num_bodies, 13
                                                           )[:, self.feet_indices, 7:10]
@@ -344,7 +342,7 @@ class LeggedRobot(BaseTask):
 
         if self.cfg.env.observe_clock_inputs:
             self.obs_buf = torch.cat((self.obs_buf,
-                                      self.clock_inputs), dim=-1)
+                                      self.clock_inputs), dim=-1) 
 
         # if self.cfg.env.observe_desired_contact_states:
         #     self.obs_buf = torch.cat((self.obs_buf,
@@ -966,8 +964,7 @@ class LeggedRobot(BaseTask):
         Args:
             env_ids (List[int]): Environemnt ids
         """
-        self.dof_pos[env_ids] = self.default_dof_pos * torch_rand_float(0.5, 1.5, (len(env_ids), self.num_dof),
-                                                                        device=self.device)
+        self.dof_pos[env_ids] = self.default_dof_pos
         self.dof_vel[env_ids] = 0.
 
         robot_env_idx = self.robot_actor_idxs.to(dtype=torch.int32, device=self.device)[env_ids]
@@ -988,12 +985,12 @@ class LeggedRobot(BaseTask):
         if self.custom_origins:
             self.root_states[robot_env_ids] = self.base_init_state
             self.root_states[robot_env_ids, :3] += self.env_origins[env_ids]
-            self.root_states[robot_env_ids, 0:1] += torch_rand_float(-cfg.terrain.x_init_range,
-                                                               cfg.terrain.x_init_range, (len(robot_env_ids), 1),
-                                                               device=self.device)
-            self.root_states[robot_env_ids, 1:2] += torch_rand_float(-cfg.terrain.y_init_range,
-                                                               cfg.terrain.y_init_range, (len(robot_env_ids), 1),
-                                                               device=self.device)
+            # self.root_states[robot_env_ids, 0:1] += torch_rand_float(-cfg.terrain.x_init_range,
+            #                                                    cfg.terrain.x_init_range, (len(robot_env_ids), 1),
+            #                                                    device=self.device)
+            # self.root_states[robot_env_ids, 1:2] += torch_rand_float(-cfg.terrain.y_init_range,
+            #                                                    cfg.terrain.y_init_range, (len(robot_env_ids), 1),
+            #                                                    device=self.device)
             self.root_states[robot_env_ids, 0] += cfg.terrain.x_init_offset
             self.root_states[robot_env_ids, 1] += cfg.terrain.y_init_offset
         else:
@@ -1001,19 +998,19 @@ class LeggedRobot(BaseTask):
             self.root_states[robot_env_ids, :3] += self.env_origins[env_ids]
 
         # base yaws
-        init_yaws = torch_rand_float(-cfg.terrain.yaw_init_range,
-                                     cfg.terrain.yaw_init_range, (len(env_ids), 1),
-                                     device=self.device)
-        quat = quat_from_angle_axis(init_yaws, torch.Tensor([0, 0, 1]).to(self.device))[:, 0, :]
-        self.root_states[env_ids, 3:7] = quat
+        # init_yaws = torch_rand_float(-cfg.terrain.yaw_init_range,
+        #                              cfg.terrain.yaw_init_range, (len(env_ids), 1),
+        #                              device=self.device)
+        # quat = quat_from_angle_axis(init_yaws, torch.Tensor([0, 0, 1]).to(self.device))[:, 0, :]
+        # self.root_states[env_ids, 3:7] = quat
 
         # base velocities
-        self.root_states[env_ids, 7:13] = torch_rand_float(-0.5, 0.5, (len(robot_env_ids), 6),
-                                                           device=self.device)  # [7:10]: lin vel, [10:13]: ang vel
+        # self.root_states[env_ids, 7:13] = torch_rand_float(-0.5, 0.5, (len(robot_env_ids), 6),
+                                                        #    device=self.device)  # [7:10]: lin vel, [10:13]: ang vel
         robot_env_ids_int32 = robot_env_ids.to(dtype=torch.int32)
         self.gym.set_actor_root_state_tensor_indexed(self.sim,
                                                      gymtorch.unwrap_tensor(self.root_states),
-                                                     gymtorch.unwrap_tensor(robot_env_ids_int32), len(robot_env_ids_int32))
+                                                     gymtorch.unwrap_tensor(robot_env_ids_int32[env_ids]), len(robot_env_ids_int32[env_ids]))
 
         if cfg.env.record_video and 0 in env_ids:
             if self.complete_video_frames is None:
@@ -1600,7 +1597,7 @@ class LeggedRobot(BaseTask):
             self.robot_actor_idxs.append(self.gym.get_actor_index(env_handle, anymal_handle, gymapi.DOMAIN_SIM))
 
             pose = gymapi.Transform()
-            pose.p = gymapi.Vec3(*(self.env_origins[i, :2] - torch.Tensor([1,0]).to(self.device)), wall_height/2)
+            pose.p = gymapi.Vec3(*(self.env_origins[i, :2] - torch.Tensor([(wall_width + wall_thickness)/2,0]).to(self.device)), wall_height/2)
             pose.r = gymapi.Quat.from_euler_zyx(0, 0, np.pi/2)
             box_handle = self.gym.create_actor(env_handle, length_box_asset, pose, "box", i, 0)
             shape_props = self.gym.get_actor_rigid_shape_properties(env_handle, box_handle)
@@ -1609,7 +1606,7 @@ class LeggedRobot(BaseTask):
             self.gym.set_actor_rigid_shape_properties(env_handle, box_handle, shape_props)
 
             pose = gymapi.Transform()
-            pose.p = gymapi.Vec3(*(self.env_origins[i, :2] + torch.Tensor([1,0]).to(self.device)), wall_height/2)
+            pose.p = gymapi.Vec3(*(self.env_origins[i, :2] + torch.Tensor([(wall_width + wall_thickness)/2, 0]).to(self.device)), wall_height/2)
             pose.r = gymapi.Quat.from_euler_zyx(0, 0, np.pi/2)
             box_handle = self.gym.create_actor(env_handle, length_box_asset, pose, "box", i, 0)
             shape_props = self.gym.get_actor_rigid_shape_properties(env_handle, box_handle)
@@ -1618,7 +1615,7 @@ class LeggedRobot(BaseTask):
             self.gym.set_actor_rigid_shape_properties(env_handle, box_handle, shape_props)
 
             pose = gymapi.Transform()
-            pose.p = gymapi.Vec3(*(self.env_origins[i, :2] - torch.Tensor([0,2]).to(self.device)), wall_height/2)
+            pose.p = gymapi.Vec3(*(self.env_origins[i, :2] - torch.Tensor([0, (wall_length + wall_thickness)/2]).to(self.device)), wall_height/2)
             pose.r = gymapi.Quat.from_euler_zyx(0, 0, 0)
             box_handle = self.gym.create_actor(env_handle, width_box_asset, pose, "box", i, 0)
             shape_props = self.gym.get_actor_rigid_shape_properties(env_handle, box_handle)
@@ -1627,7 +1624,7 @@ class LeggedRobot(BaseTask):
             self.gym.set_actor_rigid_shape_properties(env_handle, box_handle, shape_props)
 
             pose = gymapi.Transform()
-            pose.p = gymapi.Vec3(*(self.env_origins[i, :2] + torch.Tensor([0,2]).to(self.device)), wall_height/2)
+            pose.p = gymapi.Vec3(*(self.env_origins[i, :2] + torch.Tensor([0, (wall_length + wall_thickness)/2]).to(self.device)), wall_height/2)
             pose.r = gymapi.Quat.from_euler_zyx(0, 0, 0)
             box_handle = self.gym.create_actor(env_handle, width_box_asset, pose, "box", i, 0)
             shape_props = self.gym.get_actor_rigid_shape_properties(env_handle, box_handle)

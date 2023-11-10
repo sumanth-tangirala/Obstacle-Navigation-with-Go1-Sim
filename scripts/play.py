@@ -89,6 +89,9 @@ def load_env(label, headless):
     Cfg.domain_rand.randomize_lag_timesteps = True
     Cfg.control.control_type = "actuator_net"
 
+    Cfg.init_state.pos = [0, -1.5, 1.]  # x,y,z [m]
+    Cfg.init_state.rot = [0.0, 0.0, 0.7, 0.7]
+
     from go1_gym.envs.wrappers.history_wrapper import HistoryWrapper
 
     env = VelocityTrackingEasyEnv(sim_device='cuda:0', headless=headless, cfg=Cfg)
