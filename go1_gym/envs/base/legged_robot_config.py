@@ -14,6 +14,7 @@ class Cfg(PrefixProto, cli=False):
         privileged_future_horizon = 1
         num_actions = 12
         num_observation_history = 15
+        num_observation_history_vel = 15
         env_spacing = 3.  # not used with heightfields/trimeshes
         send_timeouts = True  # send time out information to the algorithm
         episode_length_s = 20  # episode length in seconds

@@ -20,7 +20,7 @@ class VelocityTrackingEasyEnv(LeggedRobot):
 
 
     def step(self, actions):
-        self.obs_buf, self.privileged_obs_buf, self.rew_buf, self.reset_buf, self.extras = super().step(actions)
+        self.obs_buf, self.obs_vel, self.privileged_obs_buf, self.rew_buf, self.reset_buf, self.extras = super().step(actions)
 
         self.foot_positions = self.rigid_body_state.view(self.num_envs, self.num_bodies, 13)[:, self.feet_indices,
                                0:3]
@@ -41,7 +41,7 @@ class VelocityTrackingEasyEnv(LeggedRobot):
             "torques": self.torques.detach().cpu().numpy()
         })
 
-        return self.obs_buf, self.rew_buf, self.reset_buf, self.extras
+        return self.obs_buf, self.obs_vel, self.rew_buf, self.reset_buf, self.extras
 
     def reset(self):
         self.reset_idx(torch.arange(self.num_envs, device=self.device))

@@ -9,10 +9,15 @@ class HistoryWrapper(gym.Wrapper):
         self.env = env
 
         self.obs_history_length = self.env.cfg.env.num_observation_history
-
         self.num_obs_history = self.obs_history_length * self.num_obs
         self.obs_history = torch.zeros(self.env.num_envs, self.num_obs_history, dtype=torch.float,
                                        device=self.env.device, requires_grad=False)
+
+        self.obs_history_vel_length = self.env.cfg.env.num_observation_history_vel
+        self.num_obs_vel_history = self.obs_history_vel_length * self.num_obs_vel
+        self.obs_history_vel = torch.zeros(self.env.num_envs, self.num_obs_history_vel, dtype=torch.float,
+                                       device=self.env.device, requires_grad=False)
+
         self.num_privileged_obs = self.num_privileged_obs
 
     def step(self, action):
@@ -21,14 +26,16 @@ class HistoryWrapper(gym.Wrapper):
         privileged_obs = info["privileged_obs"]
 
         self.obs_history = torch.cat((self.obs_history[:, self.env.num_obs:], obs), dim=-1)
-        return {'obs': obs, 'obs_vel': obs_vel, 'privileged_obs': privileged_obs, 'obs_history': self.obs_history}, rew, done, info
+        self.obs_history_vel = torch.cat((self.obs_history_vel[:, self.env.num_obs_vel:], obs_vel), dim=-1)
+        return {'obs': obs, 'obs_vel': obs_vel, 'privileged_obs': privileged_obs, 'obs_history': self.obs_history, 'obs_history_vel': obs_history_vel}, rew, done, info
 
     def get_observations(self):
         obs = self.env.get_observations()
         privileged_obs = self.env.get_privileged_observations()
         obs_vel = self.env.get_obs_vel()
         self.obs_history = torch.cat((self.obs_history[:, self.env.num_obs:], obs), dim=-1)
-        return {'obs': obs, 'privileged_obs': privileged_obs, 'obs_vel': obs_vel, 'obs_history': self.obs_history}
+        self.obs_history = torch.cat((self.obs_history_vel[:, self.env.num_obs_vel:], obs_vel), dim=-1)
+        return {'obs': obs, 'obs_vel': obs_vel, 'privileged_obs': privileged_obs, 'obs_history': self.obs_history, 'obs_history_vel': obs_history_vel}
 
     def reset_idx(self, env_ids):  # it might be a problem that this isn't getting called!!
         ret = super().reset_idx(env_ids)
