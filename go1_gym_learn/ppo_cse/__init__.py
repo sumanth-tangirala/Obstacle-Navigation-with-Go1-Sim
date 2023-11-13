@@ -107,8 +107,13 @@ class Runner:
         self.num_steps_per_env = RunnerArgs.num_steps_per_env
 
         # init storage and model
-        self.alg.init_storage(self.env.num_train_envs, self.num_steps_per_env, [self.env.num_obs],
+
+        if self.isTorque:
+            self.alg.init_storage(self.env.num_train_envs, self.num_steps_per_env, [self.env.num_obs],
                               [self.env.num_privileged_obs], [self.env.num_obs_history], [self.env.num_actions])
+        else:
+            self.alg.init_storage(self.env.num_train_envs, self.num_steps_per_env, [self.env.num_obs_vel],
+                              [self.env.num_obs_history_vel], [self.env.num_actions_vel])
 
         self.tot_timesteps = 0
         self.tot_time = 0
