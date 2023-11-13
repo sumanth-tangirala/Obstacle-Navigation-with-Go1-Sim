@@ -554,14 +554,17 @@ class LeggedRobot(BaseTask):
         assert self.privileged_obs_buf.shape[
                    1] == self.cfg.env.num_privileged_obs, f"num_privileged_obs ({self.cfg.env.num_privileged_obs}) != the number of privileged observations ({self.privileged_obs_buf.shape[1]}), you will discard data from the student!"
         
-        base_pos_x = self.base_pos[0, 0]
-        base_pos_y = self.base_pos[0, 1]
-        base_lin_vel_x = self.base_lin_vel[0, 0]
-        base_lin_vel_y = self.base_lin_vel[0, 1]
-        orientations = self.root_states[self.robot_actor_idxs, 3:7].cpu()
-        orientations = R.from_quat(orientations).as_euler('zyx')[:, 0]
+        base_pos_x = self.base_pos[:, 0]
+        base_pos_y = self.base_pos[:, 1]
+        base_lin_vel_x = self.base_lin_vel[:, 0]
+        base_lin_vel_y = self.base_lin_vel[:, 1]
+        base_ang_vel_x = self.base_ang_vel[:, 0]
+        base_ang_vel_y = self.base_ang_vel[:, 1]
+        base_ang_vel_z = self.base_ang_vel[:, 2]
+        orientations = self.base_quat.cpu()
+        orientations = torch.tensor(R.from_quat(orientations).as_euler('zyx')[:, 0]).to(self.device)
         # build obs_vel, input for velocity network
-        self.obs_vel = torch.cat(self.obs_vel, base_pos_x, base_pos_y, orientations, base_lin_vel_x, base_lin_vel_y, self.base_ang_vel, dim=-1)
+        self.obs_vel = torch.vstack((base_pos_x, base_pos_y, orientations, base_lin_vel_x, base_lin_vel_y, base_ang_vel_x, base_ang_vel_y, base_ang_vel_z)).T
 
     def create_sim(self):
         """ Creates simulation, terrain and evironments
@@ -1477,8 +1480,6 @@ class LeggedRobot(BaseTask):
 
         self.robot_actor_idxs = torch.Tensor(self.robot_actor_idxs).to(device=self.device,dtype=torch.long)
         print("Number of robot actors: ", len(self.robot_actor_idxs))
-        if len(self.robot_actor_idxs) < self.num_envs:
-            breakpoint()           
 
         self.feet_indices = torch.zeros(len(feet_names), dtype=torch.long, device=self.device, requires_grad=False)
         for i in range(len(feet_names)):
@@ -1625,7 +1626,6 @@ class LeggedRobot(BaseTask):
             self.env_origins[env_ids, 0] = spacing * xx.flatten()[:len(env_ids)]
             self.env_origins[env_ids, 1] = spacing * yy.flatten()[:len(env_ids)]
             self.env_origins[env_ids, 2] = 0.
-            #breakpoint()
 
     def _parse_cfg(self, cfg):
         self.dt = self.cfg.control.decimation * self.sim_params.dt

@@ -1,5 +1,6 @@
 # License: see [LICENSE, LICENSES/legged_gym/LICENSE]
 
+from calendar import c
 import sys
 
 import gym
@@ -39,6 +40,9 @@ class BaseTask(gym.Env):
         self.num_obs = cfg.env.num_observations
         self.num_privileged_obs = cfg.env.num_privileged_obs
         self.num_actions = cfg.env.num_actions
+        self.num_obs_vel = cfg.env.num_obs_vel
+        self.num_obs_history_vel = cfg.env.num_observation_history_vel
+        self.num_actions_vel = cfg.env.num_actions_vel
 
         if eval_cfg is not None:
             self.num_eval_envs = eval_cfg.env.num_envs

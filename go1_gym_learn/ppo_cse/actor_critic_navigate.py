@@ -101,7 +101,7 @@ class ActorCritic(nn.Module):
         return self.distribution.log_prob(actions).sum(dim=-1)
 
     def act_student(self, observation_history):
-        actions_mean = self.actor_body(observation_history, dim=-1))
+        actions_mean = self.actor_body(observation_history, dim=-1)
         return actions_mean
 
     def evaluate(self, observation_history, **kwargs):

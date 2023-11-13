@@ -61,13 +61,14 @@ class RunnerArgs(PrefixProto, cli=False):
 class Runner:
 
     def __init__(self, env, device='cpu', isTorque=True):
-        from .ppo import PPO
+        
 
         self.device = device
         self.env = env
         self.isTorque = isTorque
 
         if self.isTorque:
+            from .ppo import PPO
             from .actor_critic import ActorCritic
 
             actor_critic = ActorCritic(self.env.num_obs,
@@ -76,11 +77,12 @@ class Runner:
                                         self.env.num_actions,
                                         ).to(self.device)
         else:
+            from .ppo_navigate import PPO
             from .actor_critic_navigate import ActorCritic
 
-            actor_critic = ActorCritic(self.env.num_obs,
-                                        self.env.num_obs_history,
-                                        self.env.num_actions,
+            actor_critic = ActorCritic(self.env.num_obs_vel,
+                                        self.env.num_obs_history_vel,
+                                        self.env.num_actions_vel,
                                         ).to(self.device)
 
         if RunnerArgs.resume:

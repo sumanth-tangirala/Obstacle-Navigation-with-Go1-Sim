@@ -1,8 +1,28 @@
+import isaacgym
+assert isaacgym
+import torch
+
+def load_policy(logdir):
+    body = torch.jit.load(logdir + '/checkpoints/body_latest.jit')
+    import os
+    adaptation_module = torch.jit.load(logdir + '/checkpoints/adaptation_module_latest.jit')
+
+    def policy(obs, info={}):
+        """
+        Converts the observation into a latent vector
+        and then passes it to the body to get the action
+        """
+
+        latent = adaptation_module.forward(obs["obs_history"].to('cpu'))
+        action = body.forward(torch.cat((obs["obs_history"].to('cpu'), latent), dim=-1))
+        info['latent'] = latent
+        return action
+
+    return policy
+
+
 def train_go1(headless=True):
 
-    import isaacgym
-    assert isaacgym
-    import torch
 
     from go1_gym.envs.base.legged_robot_config import Cfg
     from go1_gym.envs.go1.go1_config import config_go1
@@ -15,8 +35,6 @@ def train_go1(headless=True):
     from go1_gym_learn.ppo_cse.actor_critic import AC_Args
     from go1_gym_learn.ppo_cse.ppo import PPO_Args
     from go1_gym_learn.ppo_cse import RunnerArgs
-
-    from .play import load_policy
 
     config_go1(Cfg)
 
@@ -209,7 +227,7 @@ def train_go1(headless=True):
 
     torque_policy = load_policy('/common/home/st1122/Projects/walk-these-ways/runs/gait-conditioned-agility/pretrain-v0/train/025417.456545')
 
-    env = VelocityTrackingEasyEnv(sim_device='cuda:0', headless=False, cfg=Cfg, torque_policy=torque_policy)
+    env = VelocityTrackingEasyEnv(sim_device='cuda:0', headless=headless, cfg=Cfg, torque_policy=torque_policy)
 
     # log the experiment parameters
     logger.log_params(AC_Args=vars(AC_Args), PPO_Args=vars(PPO_Args), RunnerArgs=vars(RunnerArgs),
@@ -217,7 +235,7 @@ def train_go1(headless=True):
 
     env = HistoryWrapper(env)
     gpu_id = 0
-    runner = Runner(env, device=f"cuda:{gpu_id}")
+    runner = Runner(env, device=f"cuda:{gpu_id}", isTorque=True)
     runner.learn(num_learning_iterations=100000, init_at_random_ep_len=True, eval_freq=100)
 
 
