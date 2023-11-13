@@ -76,6 +76,7 @@ class Runner:
                                         self.env.num_obs_history,
                                         self.env.num_actions,
                                         ).to(self.device)
+            self.alg = PPO(actor_critic, device=self.device)
         else:
             from .ppo_navigate import PPO
             from .actor_critic_navigate import ActorCritic
@@ -84,6 +85,7 @@ class Runner:
                                         self.env.num_obs_history_vel,
                                         self.env.num_actions_vel,
                                         ).to(self.device)
+            self.alg = PPO(actor_critic, device=self.device)
 
         if RunnerArgs.resume:
             # load pretrained weights from resume_path
@@ -102,7 +104,6 @@ class Runner:
                     self.env.curricula[gait_id].weights = distribution_last[f"weights_{gait_name}"]
                     print(gait_name)
 
-        self.alg = PPO(actor_critic, device=self.device)
         self.num_steps_per_env = RunnerArgs.num_steps_per_env
 
         # init storage and model
