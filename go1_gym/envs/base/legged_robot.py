@@ -14,7 +14,7 @@ from go1_gym.envs.base.base_task import BaseTask
 from go1_gym.utils.math_utils import quat_apply_yaw, wrap_to_pi, get_scale_shift
 from go1_gym.utils.terrain import Terrain
 from .legged_robot_config import Cfg
-
+from scipy.spatial.transform import Rotation as R
 
 class LeggedRobot(BaseTask):
     def __init__(self, cfg: Cfg, sim_params, physics_engine, sim_device, headless, eval_cfg=None,
@@ -89,7 +89,7 @@ class LeggedRobot(BaseTask):
         self.obs_buf = torch.clip(self.obs_buf, -clip_obs, clip_obs)
         if self.privileged_obs_buf is not None:
             self.privileged_obs_buf = torch.clip(self.privileged_obs_buf, -clip_obs, clip_obs)
-        return self.obs_buf, self.privileged_obs_buf, self.rew_buf, self.reset_buf, self.extras
+        return self.obs_buf, self.obs_vel, self.privileged_obs_buf, self.rew_buf, self.reset_buf, self.extras
 
     def post_physics_step(self):
         """ check terminations, compute observations and rewards
@@ -496,6 +496,15 @@ class LeggedRobot(BaseTask):
 
         assert self.privileged_obs_buf.shape[
                    1] == self.cfg.env.num_privileged_obs, f"num_privileged_obs ({self.cfg.env.num_privileged_obs}) != the number of privileged observations ({self.privileged_obs_buf.shape[1]}), you will discard data from the student!"
+        
+        base_pos_x = self.base_pos[0, 0]
+        base_pos_y = self.base_pos[0, 1]
+        base_lin_vel_x = self.base_lin_vel[0, 0]
+        base_lin_vel_y = self.base_lin_vel[0, 1]
+        orientations = self.root_states[self.robot_actor_idxs, 3:7].cpu()
+        orientations = R.from_quat(orientations).as_euler('zyx')[:, 0]
+        # build obs_vel, input for velocity network
+        self.obs_vel = torch.cat(self.obs_vel, base_pos_x, base_pos_y, orientations, base_lin_vel_x, base_lin_vel_y, self.base_ang_vel, dim=-1)
 
     def create_sim(self):
         """ Creates simulation, terrain and evironments

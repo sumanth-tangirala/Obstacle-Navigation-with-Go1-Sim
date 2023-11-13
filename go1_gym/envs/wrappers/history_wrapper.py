@@ -17,17 +17,18 @@ class HistoryWrapper(gym.Wrapper):
 
     def step(self, action):
         # privileged information and observation history are stored in info
-        obs, rew, done, info = self.env.step(action)
+        obs, obs_vel, rew, done, info = self.env.step(action)
         privileged_obs = info["privileged_obs"]
 
         self.obs_history = torch.cat((self.obs_history[:, self.env.num_obs:], obs), dim=-1)
-        return {'obs': obs, 'privileged_obs': privileged_obs, 'obs_history': self.obs_history}, rew, done, info
+        return {'obs': obs, 'obs_vel': obs_vel, 'privileged_obs': privileged_obs, 'obs_history': self.obs_history}, rew, done, info
 
     def get_observations(self):
         obs = self.env.get_observations()
         privileged_obs = self.env.get_privileged_observations()
+        obs_vel = self.env.get_obs_vel()
         self.obs_history = torch.cat((self.obs_history[:, self.env.num_obs:], obs), dim=-1)
-        return {'obs': obs, 'privileged_obs': privileged_obs, 'obs_history': self.obs_history}
+        return {'obs': obs, 'privileged_obs': privileged_obs, 'obs_vel': obs_vel, 'obs_history': self.obs_history}
 
     def reset_idx(self, env_ids):  # it might be a problem that this isn't getting called!!
         ret = super().reset_idx(env_ids)

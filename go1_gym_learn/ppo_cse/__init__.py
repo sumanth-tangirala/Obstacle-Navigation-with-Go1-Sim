@@ -119,8 +119,8 @@ class Runner:
         num_train_envs = self.env.num_train_envs
 
         obs_dict = self.env.get_observations()  # TODO: check, is this correct on the first step?
-        obs, privileged_obs, obs_history = obs_dict["obs"], obs_dict["privileged_obs"], obs_dict["obs_history"]
-        obs, privileged_obs, obs_history = obs.to(self.device), privileged_obs.to(self.device), obs_history.to(
+        obs, privileged_obs, obs_vel, obs_history = obs_dict["obs"], obs_dict["privileged_obs"], obs_dict["obs_vel"], obs_dict["obs_history"]
+        obs, privileged_obs, obs_vel, obs_history = obs.to(self.device), privileged_obs.to(self.device), obs_vel.to(self.device), obs_history.to(
             self.device)
         self.alg.actor_critic.train()  # switch to train mode (for dropout for example)
 
