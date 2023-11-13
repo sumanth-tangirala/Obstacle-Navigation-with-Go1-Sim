@@ -1,3 +1,4 @@
+from numpy import dtype
 import isaacgym
 assert isaacgym
 import torch
@@ -36,7 +37,7 @@ class HistoryWrapper(gym.Wrapper):
         self.obs_history = torch.cat((self.obs_history[:, self.env.num_obs:], obs), dim=-1)
         self.obs_history_vel = torch.cat((self.obs_history_vel[:, self.env.num_obs_vel:], obs_vel), dim=-1)
         
-        return {'obs': obs, 'obs_vel': obs_vel, 'privileged_obs': privileged_obs, 'obs_history': self.obs_history, 'obs_history_vel': self.obs_history_vel}
+        return {'obs': obs, 'obs_vel': obs_vel.to(dtype=torch.float), 'privileged_obs': privileged_obs, 'obs_history': self.obs_history, 'obs_history_vel': self.obs_history_vel.to(dtype=torch.float)}
 
     def reset_idx(self, env_ids):  # it might be a problem that this isn't getting called!!
         ret = super().reset_idx(env_ids)

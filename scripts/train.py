@@ -12,14 +12,13 @@ def load_policy(logdir):
     import os
     adaptation_module = torch.jit.load(logdir + '/checkpoints/adaptation_module_latest.jit')
 
-    def policy(obs, info={}):
+    def policy(obs_hist, info={}):
         """
         Converts the observation into a latent vector
         and then passes it to the body to get the action
         """
-
-        latent = adaptation_module.forward(obs["obs_history"].to('cpu'))
-        action = body.forward(torch.cat((obs["obs_history"].to('cpu'), latent), dim=-1))
+        latent = adaptation_module.forward(obs_hist.to('cpu'))
+        action = body.forward(torch.cat((obs_hist.to('cpu'), latent), dim=-1))
         info['latent'] = latent
         return action
 
@@ -37,8 +36,8 @@ def train_go1(headless=True):
 
     from go1_gym_learn.ppo_cse import Runner
     from go1_gym.envs.wrappers.history_wrapper import HistoryWrapper
-    from go1_gym_learn.ppo_cse.actor_critic import AC_Args
-    from go1_gym_learn.ppo_cse.ppo import PPO_Args
+    from go1_gym_learn.ppo_cse.actor_critic_navigate import AC_Args
+    from go1_gym_learn.ppo_cse.ppo_navigate import PPO_Args
     from go1_gym_learn.ppo_cse import RunnerArgs
 
     config_go1(Cfg)
@@ -240,7 +239,7 @@ def train_go1(headless=True):
 
     env = HistoryWrapper(env)
     gpu_id = 0
-    runner = Runner(env, device=f"cuda:{gpu_id}", isTorque=True)
+    runner = Runner(env, device=f"cuda:{gpu_id}", isTorque=False)
     runner.learn(num_learning_iterations=100000, init_at_random_ep_len=True, eval_freq=100)
 
 
@@ -281,4 +280,4 @@ if __name__ == '__main__':
                 """, filename=".charts.yml", dedent=True)
 
     # to see the environment rendering, set headless=False
-    train_go1(headless=True)
+    train_go1(headless=False)

@@ -161,32 +161,35 @@ class LeggedRobot(BaseTask):
             
         #     self.reset_buf = torch.logical_or(self.body_height_buf, self.reset_buf)
 
-    def convert_vel_to_action(self, vel, obs):
+    def convert_vel_to_action(self, vel, obs_hist, env_ids):
+        if len(env_ids) == 0:
+            return torch.tensor([])
+
         gaits = {"pronking": [0, 0, 0],
              "trotting": [0.5, 0, 0],
              "bounding": [0, 0.5, 0],
              "pacing": [0, 0, 0.5]}
         body_height_cmd = 0.0
         step_frequency_cmd = 3.0
-        gait = torch.tensor(gaits["trotting"])
+        gait = torch.tensor(gaits["trotting"]).to(self.device)
         footswing_height_cmd = 0.08
         pitch_cmd = 0.0
         roll_cmd = 0.0
         stance_width_cmd = 0.25
 
-        self.commands[:, 0] = vel[0]
-        self.commands[:, 1] = vel[1]
-        self.commands[:, 2] = vel[2]
-        self.commands[:, 3] = body_height_cmd
-        self.commands[:, 4] = step_frequency_cmd
-        self.commands[:, 5:8] = gait
-        self.commands[:, 8] = 0.5
-        self.commands[:, 9] = footswing_height_cmd
-        self.commands[:, 10] = pitch_cmd
-        self.commands[:, 11] = roll_cmd
-        self.commands[:, 12] = stance_width_cmd
+        self.commands[env_ids, 0] = vel[:, 0]
+        self.commands[env_ids, 1] = vel[:, 1]
+        self.commands[env_ids, 2] = vel[:, 2]
+        self.commands[env_ids, 3] = body_height_cmd
+        self.commands[env_ids, 4] = step_frequency_cmd
+        self.commands[env_ids, 5:8] = gait
+        self.commands[env_ids, 8] = 0.5
+        self.commands[env_ids, 9] = footswing_height_cmd
+        self.commands[env_ids, 10] = pitch_cmd
+        self.commands[env_ids, 11] = roll_cmd
+        self.commands[env_ids, 12] = stance_width_cmd
 
-        return self.torque_policy(obs)
+        return self.torque_policy(obs_hist)
 
     def reset_idx(self, env_ids):
         """ Reset some environments.
@@ -303,35 +306,26 @@ class LeggedRobot(BaseTask):
         x_pos = self.root_states[self.robot_actor_idxs, 0].cpu() - self.env_origins[:, 0].cpu()
         y_pos = self.root_states[self.robot_actor_idxs, 1].cpu() - self.env_origins[:, 1].cpu()
 
-        orientations = self.root_states[self.robot_actor_idxs, 3:7].cpu()
-        orientations = R.from_quat(orientations).as_euler('zyx')[:, 0]
         velocities = np.vstack([
             self.root_states[self.robot_actor_idxs, 7].cpu().detach().numpy(),
             self.root_states[self.robot_actor_idxs, 8].cpu().detach().numpy(),
             self.root_states[self.robot_actor_idxs, 12].cpu().detach().numpy(),
         ]).T
 
-        norm_velocities = np.linalg.norm(velocities, axis=1)
-
-
         success_indices = np.where(y_pos >= 1.5)
-        static_indices = np.where(np.abs(norm_velocities) < 0.01)
+        # static_indices = np.where(np.abs(norm_velocities) < 0.01)
 
-        indices_to_update = np.where(np.logical_and(norm_velocities > 0.01, y_pos < 1.5))
-
-        
+        indices_to_update = np.where(y_pos < 1.5)
 
         self.rew_buf[:] = 0.
         self.rew_buf_pos[:] = 0.
         self.rew_buf_neg[:] = 0.
 
         rewards = np.zeros_like(y_pos)
-        
-        rewards[static_indices] = -10
+
         rewards[success_indices] = 100
 
         y_dist = 1.5 - y_pos
-        orientation_dist = np.abs(orientations)
         closest_wall_dist = np.min(np.vstack([
             np.abs(y_pos + 2),
             np.abs(x_pos - 1),
@@ -340,7 +334,7 @@ class LeggedRobot(BaseTask):
 
         closest_wall_dist[success_indices] = 0
 
-        rewards[indices_to_update] = - y_dist[indices_to_update] - orientation_dist[indices_to_update] + closest_wall_dist[indices_to_update]
+        rewards[indices_to_update] = - (y_dist[indices_to_update] * 1.5) + closest_wall_dist[indices_to_update]
 
         self.rew_buf = torch.tensor(rewards).to(self.device)
 
@@ -915,9 +909,7 @@ class LeggedRobot(BaseTask):
         # self.root_states[env_ids, 7:13] = torch_rand_float(-0.5, 0.5, (len(robot_env_ids), 6),
                                                         #    device=self.device)  # [7:10]: lin vel, [10:13]: ang vel
         robot_env_ids_int32 = robot_env_ids.to(dtype=torch.int32)
-        self.gym.set_actor_root_state_tensor_indexed(self.sim,
-                                                     gymtorch.unwrap_tensor(self.root_states),
-                                                     gymtorch.unwrap_tensor(robot_env_ids_int32[env_ids]), len(robot_env_ids_int32[env_ids]))
+        self.gym.set_actor_root_state_tensor_indexed(self.sim, gymtorch.unwrap_tensor(self.root_states),gymtorch.unwrap_tensor(robot_env_ids_int32), len(robot_env_ids_int32))
 
         if cfg.env.record_video and 0 in env_ids:
             if self.complete_video_frames is None:

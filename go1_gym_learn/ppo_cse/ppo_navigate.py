@@ -38,17 +38,12 @@ class PPO:
         self.actor_critic.to(device)
         self.storage = None  # initialized later
         self.optimizer = optim.Adam(self.actor_critic.parameters(), lr=PPO_Args.learning_rate)
-        if self.actor_critic.decoder:
-            self.decoder_optimizer = optim.Adam(self.actor_critic.parameters(),
-                                                          lr=PPO_Args.adaptation_module_learning_rate)
         self.transition = RolloutStorage.Transition()
 
         self.learning_rate = PPO_Args.learning_rate
 
-    def init_storage(self, num_envs, num_transitions_per_env, actor_obs_shape, obs_history_shape,
-                     action_shape):
-        self.storage = RolloutStorage(num_envs, num_transitions_per_env, actor_obs_shape, [0]
-                                      obs_history_shape, action_shape, self.device)
+    def init_storage(self, num_envs, num_transitions_per_env, actor_obs_shape, obs_history_shape, action_shape):
+        self.storage = RolloutStorage(num_envs, num_transitions_per_env, actor_obs_shape, [0], obs_history_shape, action_shape, self.device)
 
     def test_mode(self):
         self.actor_critic.test()
@@ -90,10 +85,6 @@ class PPO:
     def update(self):
         mean_value_loss = 0
         mean_surrogate_loss = 0
-        mean_decoder_loss = 0
-        mean_decoder_loss_student = 0
-        mean_decoder_test_loss = 0
-        mean_decoder_test_loss_student = 0
         generator = self.storage.mini_batch_generator(PPO_Args.num_mini_batches, PPO_Args.num_learning_epochs)
         for obs_batch, critic_obs_batch, _, obs_history_batch, actions_batch, target_values_batch, advantages_batch, returns_batch, old_actions_log_prob_batch, \
             old_mu_batch, old_sigma_batch, masks_batch, env_bins_batch in generator:
@@ -151,16 +142,12 @@ class PPO:
             mean_value_loss += value_loss.item()
             mean_surrogate_loss += surrogate_loss.item()
 
-            data_size = privileged_obs_batch.shape[0]
+            data_size = obs_batch.shape[0]
             num_train = int(data_size // 5 * 4)
 
         num_updates = PPO_Args.num_learning_epochs * PPO_Args.num_mini_batches
         mean_value_loss /= num_updates
         mean_surrogate_loss /= num_updates
-        mean_decoder_loss /= (num_updates * PPO_Args.num_adaptation_module_substeps)
-        mean_decoder_loss_student /= (num_updates * PPO_Args.num_adaptation_module_substeps)
-        mean_decoder_test_loss /= (num_updates * PPO_Args.num_adaptation_module_substeps)
-        mean_decoder_test_loss_student /= (num_updates * PPO_Args.num_adaptation_module_substeps)
         self.storage.clear()
 
-        return mean_value_loss, mean_surrogate_loss, mean_decoder_loss, mean_decoder_loss_student, mean_decoder_test_loss, mean_decoder_test_loss_student
+        return mean_value_loss, mean_surrogate_loss, 0, 0, 0, 0

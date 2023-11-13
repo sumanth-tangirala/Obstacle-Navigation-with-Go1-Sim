@@ -148,6 +148,10 @@ class Runner:
             obs_vel = obs_dict["obs_vel"]
             obs_vel = obs_vel.to(self.device)
 
+        if 'obs_history_vel' in obs_dict:
+            obs_history_vel = obs_dict["obs_history_vel"]
+            obs_history_vel = obs_history_vel.to(self.device)
+
         self.alg.actor_critic.train()  # switch to train mode (for dropout for example)
 
         rewbuffer = deque(maxlen=100)
@@ -166,11 +170,14 @@ class Runner:
                     if self.isTorque:
                         actions_train = self.alg.act(obs[:num_train_envs], privileged_obs[:num_train_envs],
                                                     obs_history[:num_train_envs])
+                        actions_eval = self.alg.actor_critic.act_student(obs_history[num_train_envs:])
                     else:
-                        vel_actions_train = self.alg.act(obs_vel[:num_train_envs], obs_history[:num_train_envs])
-                        actions_train = self.env.convert_vel_to_action(vel_actions_train, obs[:num_train_envs])
+                        vel_actions_train = self.alg.act(obs_vel[:num_train_envs], obs_history_vel[:num_train_envs])
+                        actions_train = self.env.convert_vel_to_action(vel_actions_train, obs_history[:num_train_envs], env_ids=list(range(num_train_envs)))
 
-                    actions_eval = self.alg.actor_critic.act_student(obs_history[num_train_envs:])
+                        vel_actions_eval = self.alg.actor_critic.act_student(obs_history_vel[num_train_envs:])
+                        actions_eval = self.env.convert_vel_to_action(vel_actions_eval, obs_history[num_train_envs:], env_ids = list(range(num_train_envs, self.env.num_envs)))
+
                     ret = self.env.step(torch.cat((actions_train, actions_eval), dim=0))
                     obs_dict, rewards, dones, infos = ret
 
@@ -226,7 +233,12 @@ class Runner:
 
                 # Learning step
                 start = stop
-                self.alg.compute_returns(obs_history[:num_train_envs], privileged_obs[:num_train_envs])
+                # self.alg.compute_returns(obs_history[:num_train_envs], privileged_obs[:num_train_envs])
+                self.alg.compute_returns(obs_history_vel[:num_train_envs])
+
+                print('Reward Means:')
+                print(f'Train Envs: {rewards[:num_train_envs].mean()}')
+                print(f'Eval Envs: {rewards[num_train_envs:].mean()}')
 
                 if it % curriculum_dump_freq == 0:
                     logger.save_pkl({"iteration": it,
@@ -295,7 +307,7 @@ class Runner:
                     traced_script_body_module = torch.jit.script(body_model)
                     traced_script_body_module.save(body_path)
 
-                    logger.upload_file(file_path=adaptation_module_path, target_path=f"checkpoints/", once=False)
+                    # logger.upload_file(file_path=adaptation_module_path, target_path=f"checkpoints/", once=False)
                     logger.upload_file(file_path=body_path, target_path=f"checkpoints/", once=False)
 
             self.current_learning_iteration += num_learning_iterations
