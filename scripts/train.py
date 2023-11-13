@@ -16,6 +16,8 @@ def train_go1(headless=True):
     from go1_gym_learn.ppo_cse.ppo import PPO_Args
     from go1_gym_learn.ppo_cse import RunnerArgs
 
+    from .play import load_policy
+
     config_go1(Cfg)
 
     Cfg.commands.num_lin_vel_bins = 30
@@ -94,7 +96,7 @@ def train_go1(headless=True):
     Cfg.domain_rand.tile_height_update_interval = 1000000
     Cfg.domain_rand.tile_height_curriculum_step = 0.01
     Cfg.terrain.border_size = 0.0
-    Cfg.terrain.mesh_type = "trimesh"
+    Cfg.terrain.mesh_type = "plane"
     Cfg.terrain.num_cols = 30
     Cfg.terrain.num_rows = 30
     Cfg.terrain.terrain_width = 5.0
@@ -148,7 +150,8 @@ def train_go1(headless=True):
     Cfg.rewards.only_positive_rewards_ji22_style = True
     Cfg.rewards.sigma_rew_neg = 0.02
 
-
+    Cfg.init_state.pos = [0, -1.5, .5]  # x,y,z [m]
+    Cfg.init_state.rot = [0.0, 0.0, 0.7, 0.7]
 
     Cfg.commands.lin_vel_x = [-.5, .5]
     Cfg.commands.lin_vel_y = [-0.5, 0.5]
@@ -204,7 +207,9 @@ def train_go1(headless=True):
     Cfg.commands.binary_phases = True
     Cfg.commands.gaitwise_curricula = True
 
-    env = VelocityTrackingEasyEnv(sim_device='cuda:0', headless=False, cfg=Cfg)
+    torque_policy = load_policy('/common/home/st1122/Projects/walk-these-ways/runs/gait-conditioned-agility/pretrain-v0/train/025417.456545')
+
+    env = VelocityTrackingEasyEnv(sim_device='cuda:0', headless=False, cfg=Cfg, torque_policy=torque_policy)
 
     # log the experiment parameters
     logger.log_params(AC_Args=vars(AC_Args), PPO_Args=vars(PPO_Args), RunnerArgs=vars(RunnerArgs),

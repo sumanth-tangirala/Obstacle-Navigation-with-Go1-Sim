@@ -49,6 +49,8 @@ def load_env(label, headless):
     else:
         logdir = label
 
+    policy = load_policy(logdir)
+
     with open(os.path.join(logdir, "parameters.pkl"), 'rb') as file:
         pkl_cfg = pkl.load(file)
         print(pkl_cfg.keys())
@@ -89,19 +91,17 @@ def load_env(label, headless):
     Cfg.domain_rand.randomize_lag_timesteps = True
     Cfg.control.control_type = "actuator_net"
 
-    Cfg.init_state.pos = [0, -1.5, 1.]  # x,y,z [m]
+    Cfg.init_state.pos = [0, -1.5, .5]  # x,y,z [m]
     Cfg.init_state.rot = [0.0, 0.0, 0.7, 0.7]
 
     from go1_gym.envs.wrappers.history_wrapper import HistoryWrapper
 
-    env = VelocityTrackingEasyEnv(sim_device='cuda:0', headless=headless, cfg=Cfg)
+    env = VelocityTrackingEasyEnv(sim_device='cuda:0', headless=headless, cfg=Cfg, torque_policy=policy)
     env = HistoryWrapper(env)
 
     # load policy
     from ml_logger import logger
     from go1_gym_learn.ppo_cse.actor_critic import ActorCritic
-
-    policy = load_policy(logdir)
 
     return env, policy
 
@@ -116,7 +116,7 @@ def play_go1(headless=True):
 
     label = "gait-conditioned-agility/pretrain-v0/train"
 
-    env, policy = load_env(label, headless)
+    env, torque_policy = load_env(label, headless)
 
     num_eval_steps = 500
     gaits = {"pronking": [0, 0, 0],
@@ -128,39 +128,19 @@ def play_go1(headless=True):
 
     plans = [
         {
-            "plan_end_timestep": num_eval_steps/5,
-            "x_vel_cmd": 0,
-            "y_vel_cmd": 0.4,
-            "yaw_vel_cmd": 0,
-        },
-        {
-            "plan_end_timestep": num_eval_steps*2/5,
-            "x_vel_cmd": -0.3,
+            "x_vel_cmd": 0.4,
             "y_vel_cmd": 0,
             "yaw_vel_cmd": 0,
         },
         {
-            "plan_end_timestep": num_eval_steps*3/5,
-            "x_vel_cmd": 0,
-            "y_vel_cmd": -0.3,
-            "yaw_vel_cmd": 0,
-        },
-        {
-            "plan_end_timestep": num_eval_steps*4/5,
-            "x_vel_cmd": 0.5,
+            "x_vel_cmd": -0.4,
             "y_vel_cmd": 0,
             "yaw_vel_cmd": 0,
-        },
-        {
-            "plan_end_timestep": num_eval_steps,
-            "x_vel_cmd": 0,
-            "y_vel_cmd": 0,
-            "yaw_vel_cmd": -0.25,
         },
     ]
 
-    x_vel_cmd, y_vel_cmd, yaw_vel_cmd, plan_end_timestep = plans[current_plan_idx]['x_vel_cmd'], plans[current_plan_idx]['y_vel_cmd'], plans[current_plan_idx][
-        'yaw_vel_cmd'], plans[current_plan_idx]['plan_end_timestep']
+    x_vel_cmd, y_vel_cmd, yaw_vel_cmd = plans[current_plan_idx]['x_vel_cmd'], plans[current_plan_idx]['y_vel_cmd'], plans[current_plan_idx][
+        'yaw_vel_cmd']
     body_height_cmd = 0.0
     step_frequency_cmd = 3.0
     gait = torch.tensor(gaits["trotting"])
@@ -186,20 +166,8 @@ def play_go1(headless=True):
     obs = env.reset()
 
     for i in tqdm(range(num_eval_steps)):
-        with torch.no_grad():
-            actions = policy(obs)
-            actions = torch.zeros_like(actions)
-        env.commands[:, 0] = x_vel_cmd
-        env.commands[:, 1] = y_vel_cmd
-        env.commands[:, 2] = yaw_vel_cmd
-        env.commands[:, 3] = body_height_cmd
-        env.commands[:, 4] = step_frequency_cmd
-        env.commands[:, 5:8] = gait
-        env.commands[:, 8] = 0.5
-        env.commands[:, 9] = footswing_height_cmd
-        env.commands[:, 10] = pitch_cmd
-        env.commands[:, 11] = roll_cmd
-        env.commands[:, 12] = stance_width_cmd
+        actions = env.convert_vel_to_action([x_vel_cmd, y_vel_cmd, yaw_vel_cmd], obs)
+
         obs, rew, done, info = env.step(actions)
 
         measured_x_vels[i] = env.base_lin_vel[0, 0]
@@ -212,17 +180,13 @@ def play_go1(headless=True):
 
         joint_positions[i] = env.dof_pos[0, :].cpu()
 
-        if i >= plan_end_timestep:
+        if done:
+            break
 
-            current_plan_idx += 1
-            if current_plan_idx >= len(plans):
-                print('Finished', current_plan_idx, len(plans))
-                break
-            x_vel_cmd, y_vel_cmd, yaw_vel_cmd, plan_end_timestep = plans[current_plan_idx]['x_vel_cmd'], plans[current_plan_idx][
-                'y_vel_cmd'], plans[current_plan_idx][
-                'yaw_vel_cmd'], plans[current_plan_idx]['plan_end_timestep']
+        if i % 4 == 0:
+            x_vel_cmd += 0.1
 
-    logger.save_video(env.video_frames, "videos/plan.mp4", fps=1 / env.dt)
+    # logger.save_video(env.video_frames, "videos/plan.mp4", fps=1 / env.dt)
 
 
     # plot target and measured forward velocity
