@@ -1,5 +1,10 @@
+
+import os
+os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
+
 import isaacgym
 assert isaacgym
+
 import torch
 
 def load_policy(logdir):

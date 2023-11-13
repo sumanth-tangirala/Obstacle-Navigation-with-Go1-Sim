@@ -300,8 +300,9 @@ class LeggedRobot(BaseTask):
             Calls each reward function which had a non-zero scale (processed in self._prepare_reward_function())
             adds each terms to the episode sums and to the total reward
         """
-        x_pos = self.root_states[self.robot_actor_idxs, 0].cpu()
-        y_pos = self.root_states[self.robot_actor_idxs, 1].cpu()
+        x_pos = self.root_states[self.robot_actor_idxs, 0].cpu() - self.env_origins[:, 0].cpu()
+        y_pos = self.root_states[self.robot_actor_idxs, 1].cpu() - self.env_origins[:, 1].cpu()
+
         orientations = self.root_states[self.robot_actor_idxs, 3:7].cpu()
         orientations = R.from_quat(orientations).as_euler('zyx')[:, 0]
         velocities = np.vstack([
@@ -554,8 +555,8 @@ class LeggedRobot(BaseTask):
         assert self.privileged_obs_buf.shape[
                    1] == self.cfg.env.num_privileged_obs, f"num_privileged_obs ({self.cfg.env.num_privileged_obs}) != the number of privileged observations ({self.privileged_obs_buf.shape[1]}), you will discard data from the student!"
         
-        base_pos_x = self.base_pos[:, 0]
-        base_pos_y = self.base_pos[:, 1]
+        base_pos_x = self.base_pos[:, 0] - self.env_origins[:, 0]
+        base_pos_y = self.base_pos[:, 1] - self.env_origins[:, 1]
         base_lin_vel_x = self.base_lin_vel[:, 0]
         base_lin_vel_y = self.base_lin_vel[:, 1]
         base_ang_vel_x = self.base_ang_vel[:, 0]
