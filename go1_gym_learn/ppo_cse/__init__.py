@@ -162,9 +162,12 @@ class Runner:
         cur_episode_length = torch.zeros(self.env.num_envs, dtype=torch.float, device=self.device)
 
         tot_iter = self.current_learning_iteration + num_learning_iterations
+        total_dones = 0
         for it in range(self.current_learning_iteration, tot_iter):
             start = time.time()
             # Rollout
+            total_dones += env_dones
+            env_dones = 0
             with torch.inference_mode():
                 for i in range(self.num_steps_per_env):
                     if self.isTorque:
@@ -228,6 +231,9 @@ class Runner:
                     if 'curriculum/distribution' in infos:
                         distribution = infos['curriculum/distribution']
 
+                    if(i == self.num_steps_per_env)
+                        env_dones = dones.sum()
+
                 stop = time.time()
                 collection_time = stop - start
 
@@ -251,6 +257,7 @@ class Runner:
                                          "distribution": distribution},
                                          path=f"curriculum/distribution.pkl", append=True)
 
+            success_rate_env = (env_dones/num_steps_per_env) * 100
             results = self.alg.update()
 
             if self.isTorque:
@@ -275,7 +282,8 @@ class Runner:
                 mean_decoder_loss_student=mean_decoder_loss_student,
                 mean_decoder_test_loss=mean_decoder_test_loss,
                 mean_decoder_test_loss_student=mean_decoder_test_loss_student,
-                mean_adaptation_module_test_loss=mean_adaptation_module_test_loss
+                mean_adaptation_module_test_loss=mean_adaptation_module_test_loss,
+                success_rate_env=success_rate_env
             )
 
             if RunnerArgs.save_video_interval:
@@ -312,6 +320,8 @@ class Runner:
 
             self.current_learning_iteration += num_learning_iterations
 
+        success_rate = (total_dones/current_learning_iteration) * 100
+        print("Final success rate:", success_rate)
         with logger.Sync():
             logger.torch_save(self.alg.actor_critic.state_dict(), f"checkpoints/ac_weights_{it:06d}.pt")
             logger.duplicate(f"checkpoints/ac_weights_{it:06d}.pt", f"checkpoints/ac_weights_last.pt")
