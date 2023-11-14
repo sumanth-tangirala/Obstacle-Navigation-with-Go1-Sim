@@ -4,7 +4,6 @@ import isaacgym
 assert isaacgym
 
 import os
-os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
 
 import torch
 import numpy as np

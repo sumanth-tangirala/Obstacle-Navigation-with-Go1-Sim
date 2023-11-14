@@ -232,7 +232,7 @@ def train_go1(headless=True):
     torque_policy = load_policy('/common/home/st1122/Projects/walk-these-ways/runs/gait-conditioned-agility/pretrain-v0/train/025417.456545')
 
     env = ObstacleAvoidance(
-      sim_device='cuda:1', 
+      sim_device='cuda:0', 
       headless=headless, 
       cfg=Cfg, 
       torque_policy=torque_policy, 
@@ -244,7 +244,7 @@ def train_go1(headless=True):
                       Cfg=vars(Cfg))
 
     env = HistoryWrapper(env)
-    gpu_id = 1
+    gpu_id = 0
     runner = Runner(env, device=f"cuda:{gpu_id}", isTorque=False)
     runner.learn(num_learning_iterations=100000, init_at_random_ep_len=True, eval_freq=100)
 

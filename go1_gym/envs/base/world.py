@@ -3,6 +3,7 @@
 import os
 from typing import Dict
 import numpy as np
+from go1_gym_learn import env
 
 from isaacgym import gymtorch, gymapi, gymutil
 from isaacgym.torch_utils import *
@@ -51,7 +52,6 @@ class World(BaseTask):
 
         # self.rand_buffers_eval = self._init_custom_buffers__(self.num_eval_envs)
         if not self.headless:
-            print(self.env_origins[0])
             position = self.env_origins[0] + torch.tensor([0,0,5]).to(self.device)
             lookat = position + torch.tensor([-0.1,0,-3]).to(self.device)
 
@@ -129,6 +129,12 @@ class World(BaseTask):
         self.check_termination()
         self.compute_reward()
         env_ids = self.reset_buf.nonzero(as_tuple=False).flatten()
+
+        self.extras['rew_buf'] = self.rew_buf.clone()
+        self.extras['y_dist_rew'] = self.y_dist_rew.clone()
+        self.extras['closest_wall_dist_rew'] = self.closest_wall_dist_rew.clone()
+        self.extras['goal_rew'] = self.goal_rew.clone()
+
         self.reset_idx(env_ids)
         self.compute_observations()
 
@@ -206,6 +212,10 @@ class World(BaseTask):
 
         if len(env_ids) == 0:
             return
+
+        self.y_dist_rew[env_ids] = 0.
+        self.closest_wall_dist_rew[env_ids] = 0.
+        self.goal_rew[env_ids] = 0.
 
         # reset robot states
         if self.cfg.domain_rand.randomize_rigids_after_start:
@@ -323,53 +333,30 @@ class World(BaseTask):
         self.rew_buf_pos[:] = 0.
         self.rew_buf_neg[:] = 0.
 
-        rewards = np.zeros_like(y_pos)
+        rewards = torch.zeros_like(y_pos)
+        goal_reward = torch.zeros_like(y_pos)
 
         rewards[success_indices] = 100
+        goal_reward[success_indices] = 100
 
         y_dist = 1.5 - y_pos
-        closest_wall_dist = np.min(np.vstack([
+        closest_wall_dist = torch.tensor(np.min(np.vstack([
             np.abs(y_pos + 2),
             np.abs(x_pos - 1),
             np.abs(x_pos + 1),
-        ]), axis = 0)
+        ]), axis = 0))
+
+        # closest_wall_dist = (torch.abs(y_pos + 2) + torch.abs(x_pos - 1) + torch.abs(x_pos + 1))/3
 
         closest_wall_dist[success_indices] = 0
 
         rewards[indices_to_update] = - y_dist[indices_to_update] + closest_wall_dist[indices_to_update]
 
-        self.rew_buf = torch.tensor(rewards).to(self.device)
+        self.y_dist_rew = -y_dist.to(self.device)
+        self.closest_wall_dist_rew = closest_wall_dist.to(self.device)
+        self.goal_rew = goal_reward.to(self.device)
 
-        # for i in range(len(self.reward_functions)):
-        #     name = self.reward_names[i]
-        #     rew = self.reward_functions[i]() * self.reward_scales[name]
-        #     self.rew_buf += rew
-        #     if torch.sum(rew) >= 0:
-        #         self.rew_buf_pos += rew
-        #     elif torch.sum(rew) <= 0:
-        #         self.rew_buf_neg += rew
-        #     self.episode_sums[name] += rew
-        #     if name in ['tracking_contacts_shaped_force', 'tracking_contacts_shaped_vel']:
-        #         self.command_sums[name] += self.reward_scales[name] + rew
-        #     else:
-        #         self.command_sums[name] += rew
-        # if self.cfg.rewards.only_positive_rewards:
-        #     self.rew_buf[:] = torch.clip(self.rew_buf[:], min=0.)
-        # elif self.cfg.rewards.only_positive_rewards_ji22_style: #TODO: update
-        #     self.rew_buf[:] = self.rew_buf_pos[:] * torch.exp(self.rew_buf_neg[:] / self.cfg.rewards.sigma_rew_neg)
-        # self.episode_sums["total"] += self.rew_buf
-        # # add termination reward after clipping
-        # if "termination" in self.reward_scales:
-        #     rew = self.reward_container._reward_termination() * self.reward_scales["termination"]
-        #     self.rew_buf += rew
-        #     self.episode_sums["termination"] += rew
-            # self.command_sums["termination"] += rew
-
-        # self.command_sums["lin_vel_raw"] += self.base_lin_vel[:, 0]
-        # self.command_sums["ang_vel_raw"] += self.base_ang_vel[:, 2]
-        # self.command_sums["lin_vel_residual"] += (self.base_lin_vel[:, 0] - self.commands[:, 0]) ** 2
-        # self.command_sums["ang_vel_residual"] += (self.base_ang_vel[:, 2] - self.commands[:, 2]) ** 2
-        # self.command_sums["ep_timesteps"] += 1
+        self.rew_buf = rewards.to(self.device)
 
     def compute_observations(self):
         """ Computes observations
@@ -1504,7 +1491,9 @@ class World(BaseTask):
             self.camera_props.width = 1080
             self.camera_props.height = 720
             self.rendering_camera = self.gym.create_camera_sensor(self.envs[0], self.camera_props)
-            cam_pos, cam_target = self.get_camera_parameters(self.cfg.viewer.pos, self.cfg.viewer.lookat)
+            position = self.env_origins[0] + torch.tensor([0,0,5]).to(self.device)
+            lookat = position + torch.tensor([-0.1,0,-3]).to(self.device)
+            cam_pos, cam_target = self.get_camera_parameters(position, lookat)
             self.gym.set_camera_location(self.rendering_camera, self.envs[0], cam_pos, cam_target)
             if self.eval_cfg is not None:
                 self.rendering_camera_eval = self.gym.create_camera_sensor(self.envs[self.num_train_envs],
