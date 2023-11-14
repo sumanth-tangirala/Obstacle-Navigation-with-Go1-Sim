@@ -1,3 +1,4 @@
+from go1_gym.envs.go1.obstacle_avoidance import ObstacleAvoidance
 import isaacgym
 
 assert isaacgym
@@ -19,10 +20,25 @@ from go1_gym.envs.go1.velocity_tracking import VelocityTrackingEasyEnv
 
 from tqdm import tqdm
 
-def load_policy(logdir):
+def load_torque_policy(logdir):
     body = torch.jit.load(logdir + '/checkpoints/body_latest.jit')
     import os
     adaptation_module = torch.jit.load(logdir + '/checkpoints/adaptation_module_latest.jit')
+
+    def policy(obs_hist, info={}):
+        """
+        Converts the observation into a latent vector
+        and then passes it to the body to get the action
+        """
+        latent = adaptation_module.forward(obs_hist.to('cpu'))
+        action = body.forward(torch.cat((obs_hist.to('cpu'), latent), dim=-1))
+        info['latent'] = latent
+        return action
+
+    return policy
+
+def load_velocity_policy(logdir):
+    body = torch.jit.load(logdir + '/checkpoints/body_latest.jit')
 
     def policy(obs, info={}):
         """
@@ -30,10 +46,10 @@ def load_policy(logdir):
         and then passes it to the body to get the action
         """
 
-        latent = adaptation_module.forward(obs["obs_history"].to('cpu'))
-        action = body.forward(torch.cat((obs["obs_history"].to('cpu'), latent), dim=-1))
-        info['latent'] = latent
-        return action
+        action = body.forward(obs["obs_history_vel"].to('cpu', dtype=torch.float))
+        action = torch.clip(action, min=torch.tensor([-0.5, -0.5, -0.5]), max=torch.tensor([0.5, 0.5, 0.5]))
+    
+        return action.cpu().detach()
 
     return policy
 
@@ -49,7 +65,8 @@ def load_env(label, headless):
     else:
         logdir = label
 
-    policy = load_policy(logdir)
+    policy = load_velocity_policy(logdir)
+    torque_policy = load_torque_policy('/common/home/st1122/Projects/walk-these-ways/runs/gait-conditioned-agility/pretrain-v0/train/025417.456545')
 
     with open(os.path.join(logdir, "parameters.pkl"), 'rb') as file:
         pkl_cfg = pkl.load(file)
@@ -96,12 +113,8 @@ def load_env(label, headless):
 
     from go1_gym.envs.wrappers.history_wrapper import HistoryWrapper
 
-    env = VelocityTrackingEasyEnv(sim_device='cuda:0', headless=headless, cfg=Cfg, torque_policy=policy)
+    env = ObstacleAvoidance(sim_device='cuda:0', headless=headless, cfg=Cfg, torque_policy=torque_policy, random_init=False)
     env = HistoryWrapper(env)
-
-    # load policy
-    from ml_logger import logger
-    from go1_gym_learn.ppo_cse.actor_critic import ActorCritic
 
     return env, policy
 
@@ -114,50 +127,11 @@ def play_go1(headless=True):
     import glob
     import os
 
-    label = "gait-conditioned-agility/pretrain-v0/train"
+    label = "/common/home/st1122/Projects/walk-these-ways/runs/gait-conditioned-agility/2023-11-13/train/234829.495325"
 
-    env, torque_policy = load_env(label, headless)
+    env, vel_policy = load_env(label, headless)
 
-    num_eval_steps = 500
-    gaits = {"pronking": [0, 0, 0],
-             "trotting": [0.5, 0, 0],
-             "bounding": [0, 0.5, 0],
-             "pacing": [0, 0, 0.5]}
-
-    current_plan_idx = 0
-
-    plans = [
-        {
-            "x_vel_cmd": 0.4,
-            "y_vel_cmd": 0,
-            "yaw_vel_cmd": 0,
-        },
-        {
-            "x_vel_cmd": -0.4,
-            "y_vel_cmd": 0,
-            "yaw_vel_cmd": 0,
-        },
-    ]
-
-    x_vel_cmd, y_vel_cmd, yaw_vel_cmd = plans[current_plan_idx]['x_vel_cmd'], plans[current_plan_idx]['y_vel_cmd'], plans[current_plan_idx][
-        'yaw_vel_cmd']
-    body_height_cmd = 0.0
-    step_frequency_cmd = 3.0
-    gait = torch.tensor(gaits["trotting"])
-    footswing_height_cmd = 0.08
-    pitch_cmd = 0.0
-    roll_cmd = 0.0
-    stance_width_cmd = 0.25
-
-    measured_x_vels = np.zeros(num_eval_steps)
-    measured_y_vels = np.zeros(num_eval_steps)
-    measured_yaw_vels = np.zeros(num_eval_steps)
-
-    target_x_vels = np.zeros(num_eval_steps)
-    target_y_vels = np.zeros(num_eval_steps)
-    target_yaw_vels = np.zeros(num_eval_steps)
-
-    joint_positions = np.zeros((num_eval_steps, 12))
+    num_eval_steps = 750
 
     env.start_recording()
     env.record_now = True
@@ -166,61 +140,16 @@ def play_go1(headless=True):
     obs = env.reset()
 
     for i in tqdm(range(num_eval_steps)):
-        actions = env.convert_vel_to_action([x_vel_cmd, y_vel_cmd, yaw_vel_cmd], obs)
+        vel_actions = vel_policy(obs)
+        torque_actions = env.convert_vel_to_action(vel_actions, obs['obs_history'])
 
-        obs, rew, done, info = env.step(actions)
-
-        measured_x_vels[i] = env.base_lin_vel[0, 0]
-        measured_y_vels[i] = env.base_lin_vel[0, 1]
-        measured_yaw_vels[i] = env.base_ang_vel[0, 2]
-
-        target_x_vels[i] = x_vel_cmd
-        target_y_vels[i] = y_vel_cmd
-        target_yaw_vels[i] = yaw_vel_cmd
-
-        joint_positions[i] = env.dof_pos[0, :].cpu()
+        obs, rew, done, info = env.step(torque_actions)
 
         if done:
-            break
+            print('Success!')
 
-        if i % 4 == 0:
-            x_vel_cmd += 0.1
 
     # logger.save_video(env.video_frames, "videos/plan.mp4", fps=1 / env.dt)
-
-
-    # plot target and measured forward velocity
-    from matplotlib import pyplot as plt
-    fig, axs = plt.subplots(4, 1, figsize=(12, 10))
-
-    axs[0].plot(np.linspace(0, num_eval_steps * env.dt, num_eval_steps), measured_x_vels, color='black', linestyle="-", label="Measured")
-    axs[0].plot(np.linspace(0, num_eval_steps * env.dt, num_eval_steps), target_x_vels, color='black', linestyle="--", label="Desired")
-    axs[0].legend()
-    axs[0].set_title("Left/Right Velocity")
-    axs[0].set_xlabel("Time (s)")
-    axs[0].set_ylabel("Velocity (m/s)")
-
-    axs[1].plot(np.linspace(0, num_eval_steps * env.dt, num_eval_steps), measured_y_vels, color='black', linestyle="-", label="Measured")
-    axs[1].plot(np.linspace(0, num_eval_steps * env.dt, num_eval_steps), target_y_vels, color='black', linestyle="--", label="Desired")
-    axs[1].legend()
-    axs[1].set_title("Forward Velocity")
-    axs[1].set_xlabel("Time (s)")
-    axs[1].set_ylabel("Velocity (m/s)")
-
-    axs[2].plot(np.linspace(0, num_eval_steps * env.dt, num_eval_steps), measured_yaw_vels, color='black', linestyle="-", label="Measured")
-    axs[2].plot(np.linspace(0, num_eval_steps * env.dt, num_eval_steps), target_yaw_vels, color='black', linestyle="--", label="Desired")
-    axs[2].legend()
-    axs[2].set_title("Angular Velocity")
-    axs[2].set_xlabel("Time (s)")
-    axs[2].set_ylabel("Velocity (m/s)")
-
-    axs[3].plot(np.linspace(0, num_eval_steps * env.dt, num_eval_steps), joint_positions, linestyle="-", label="Measured")
-    axs[3].set_title("Joint Positions")
-    axs[3].set_xlabel("Time (s)")
-    axs[3].set_ylabel("Joint Position (rad)")
-
-    plt.tight_layout()
-    plt.show()
 
 
 if __name__ == '__main__':
