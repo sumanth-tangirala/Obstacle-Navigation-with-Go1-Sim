@@ -231,14 +231,20 @@ def train_go1(headless=True):
 
     torque_policy = load_policy('/common/home/st1122/Projects/walk-these-ways/runs/gait-conditioned-agility/pretrain-v0/train/025417.456545')
 
-    env = ObstacleAvoidance(sim_device='cuda:0', headless=headless, cfg=Cfg, torque_policy=torque_policy, random_init=True)
+    env = ObstacleAvoidance(
+      sim_device='cuda:1', 
+      headless=headless, 
+      cfg=Cfg, 
+      torque_policy=torque_policy, 
+      random_init=False
+    )
 
     # log the experiment parameters
     logger.log_params(AC_Args=vars(AC_Args), PPO_Args=vars(PPO_Args), RunnerArgs=vars(RunnerArgs),
                       Cfg=vars(Cfg))
 
     env = HistoryWrapper(env)
-    gpu_id = 0
+    gpu_id = 1
     runner = Runner(env, device=f"cuda:{gpu_id}", isTorque=False)
     runner.learn(num_learning_iterations=100000, init_at_random_ep_len=True, eval_freq=100)
 

@@ -47,7 +47,7 @@ def load_velocity_policy(logdir):
         """
 
         action = body.forward(obs["obs_history_vel"].to('cpu', dtype=torch.float))
-        action = torch.clip(action, min=torch.tensor([-0.5, -0.5, -0.5]), max=torch.tensor([0.5, 0.5, 0.5]))
+
     
         return action.cpu().detach()
 
@@ -113,7 +113,13 @@ def load_env(label, headless):
 
     from go1_gym.envs.wrappers.history_wrapper import HistoryWrapper
 
-    env = ObstacleAvoidance(sim_device='cuda:0', headless=headless, cfg=Cfg, torque_policy=torque_policy, random_init=False)
+    env = ObstacleAvoidance(
+        sim_device='cuda:0', 
+        headless=headless, 
+        cfg=Cfg, 
+        torque_policy=torque_policy, 
+        random_init=False,
+    )
     env = HistoryWrapper(env)
 
     return env, policy

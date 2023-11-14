@@ -42,7 +42,7 @@ caches = DataCaches(1)
 class RunnerArgs(PrefixProto, cli=False):
     # runner
     algorithm_class_name = 'RMA'
-    num_steps_per_env = 24  # per iteration
+    num_steps_per_env = 50  # per iteration
     max_iterations = 1500  # number of policy updates
 
     # logging
@@ -162,13 +162,15 @@ class Runner:
         cur_episode_length = torch.zeros(self.env.num_envs, dtype=torch.float, device=self.device)
 
         tot_iter = self.current_learning_iteration + num_learning_iterations
-        total_dones = 0
+        total_dones = []
+        model_root_path = os.path.join(logger.root, logger.prefix)
+
         for it in range(self.current_learning_iteration, tot_iter):
             start = time.time()
             # Rollout
-            total_dones += env_dones
             env_dones = 0
             with torch.inference_mode():
+                dones = None
                 for i in range(self.num_steps_per_env):
                     if self.isTorque:
                         actions_train = self.alg.act(obs[:num_train_envs], privileged_obs[:num_train_envs],
@@ -231,8 +233,8 @@ class Runner:
                     if 'curriculum/distribution' in infos:
                         distribution = infos['curriculum/distribution']
 
-                    if(i == self.num_steps_per_env)
-                        env_dones = dones.sum()
+                env_dones = 100 * dones.sum()/self.env.num_envs
+                total_dones.append(env_dones)
 
                 stop = time.time()
                 collection_time = stop - start
@@ -245,6 +247,10 @@ class Runner:
                 print('Reward Means:')
                 print(f'Train Envs: {rewards[:num_train_envs].mean()}')
                 print(f'Eval Envs: {rewards[num_train_envs:].mean()}')
+                print(f'Success Rates: {env_dones}%')
+
+                with open(os.path.join(model_root_path, 'success_rate.txt'), 'a') as f:
+                    f.write(f'{env_dones}\n')
 
                 if it % curriculum_dump_freq == 0:
                     logger.save_pkl({"iteration": it,
@@ -257,7 +263,6 @@ class Runner:
                                          "distribution": distribution},
                                          path=f"curriculum/distribution.pkl", append=True)
 
-            success_rate_env = (env_dones/num_steps_per_env) * 100
             results = self.alg.update()
 
             if self.isTorque:
@@ -282,8 +287,7 @@ class Runner:
                 mean_decoder_loss_student=mean_decoder_loss_student,
                 mean_decoder_test_loss=mean_decoder_test_loss,
                 mean_decoder_test_loss_student=mean_decoder_test_loss_student,
-                mean_adaptation_module_test_loss=mean_adaptation_module_test_loss,
-                success_rate_env=success_rate_env
+                mean_adaptation_module_test_loss=mean_adaptation_module_test_loss
             )
 
             if RunnerArgs.save_video_interval:
@@ -320,8 +324,6 @@ class Runner:
 
             self.current_learning_iteration += num_learning_iterations
 
-        success_rate = (total_dones/current_learning_iteration) * 100
-        print("Final success rate:", success_rate)
         with logger.Sync():
             logger.torch_save(self.alg.actor_critic.state_dict(), f"checkpoints/ac_weights_{it:06d}.pt")
             logger.duplicate(f"checkpoints/ac_weights_{it:06d}.pt", f"checkpoints/ac_weights_last.pt")

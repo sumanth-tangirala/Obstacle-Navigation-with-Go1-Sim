@@ -161,6 +161,7 @@ class World(BaseTask):
         #     self.reset_buf = torch.logical_or(self.body_height_buf, self.reset_buf)
 
     def convert_vel_to_action(self, vel, obs_hist, env_ids=None):
+        vel = torch.clip(vel.to(self.device), min=torch.tensor([-0.5, -0.5, -0.5]).to(self.device), max=torch.tensor([0.5, 0.5, 0.5]).to(self.device))
         if env_ids is None:
             env_ids = [0]
 
