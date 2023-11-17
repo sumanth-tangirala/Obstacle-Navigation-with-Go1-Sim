@@ -1,6 +1,7 @@
 # Go1 Sim-to-Real Locomotion Starter Kit
 
 
+
 # Table of contents
 1. [Overview](#overview)
 2. [System Requirements](#requirements)
