@@ -3,6 +3,8 @@ from collections import deque
 import copy
 import os
 
+from numpy import dtype
+
 import torch
 from ml_logger import logger
 from params_proto import PrefixProto
@@ -42,13 +44,18 @@ caches = DataCaches(1)
 class RunnerArgs(PrefixProto, cli=False):
     # runner
     algorithm_class_name = 'RMA'
-    num_steps_per_env = 100  # per iteration
+    num_steps_per_env = 200  # per iteration
     max_iterations = 1500  # number of policy updates
 
     # logging
-    save_interval = 400  # check for potential saves every this many iterations
-    save_video_interval = 100
+    save_interval = 15  # check for potential saves every this many iterations
+    save_video_interval = 10
     log_freq = 10
+
+    # best perf save details
+    min_best_eval_it = 10
+    min_duration_for_best_eval = 5
+    success_rate_increase_threshold = 7
 
     # load and resume
     resume = False
@@ -118,7 +125,7 @@ class Runner:
         self.tot_timesteps = 0
         self.tot_time = 0
         self.current_learning_iteration = 0
-        self.last_recording_it = 0
+        self.last_recording_it = None
 
         self.env.reset()
 
@@ -168,27 +175,32 @@ class Runner:
         wall_dist_rews_buf = []
         ep_goal_rews_buf = []
         num_traj_buf = []
+        max_success_rate = 0
+        last_max_success_rate_it = 0
         
 
         model_root_path = os.path.join(logger.root, logger.prefix)
 
         for it in range(self.current_learning_iteration, tot_iter):
-
+    
             start = time.time()
             # Rollout
 
-            tot_success = 0
+            num_success = 0
             tot_rew = 0
             tot_y_dist_rew = 0
             tot_wall_dist_rew = 0
             tot_goal_rew = 0
             num_traj = self.env.num_envs
-            prev_dones = 0
+            num_new_traj = 0
+            frames = None
+
+            failures = torch.zeros(self.env.num_envs, dtype=torch.bool, device=self.device)
 
             with torch.inference_mode():
                 dones = None
                 for i in range(self.num_steps_per_env):
-                    num_traj += prev_dones
+                    num_traj += num_new_traj
 
                     if self.isTorque:
                         actions_train = self.alg.act(obs[:num_train_envs], privileged_obs[:num_train_envs],
@@ -204,9 +216,14 @@ class Runner:
                     ret = self.env.step(torch.cat((actions_train, actions_eval), dim=0))
                     obs_dict, rewards, dones, infos = ret
 
-                    num_success = torch.sum(dones.to(dtype=torch.float))
-                    tot_success += num_success
-                    prev_dones = num_success
+                    failures = failures | dones
+
+                    if it == self.last_recording_it and dones[0] and frames is None:
+                        frames = self.env.get_complete_frames() or self.env.video_frames
+
+                    new_success = torch.sum(dones.to(dtype=torch.float))
+                    num_success += new_success
+                    num_new_traj = new_success
 
                     tot_rew += infos['rew_buf'].sum()
                     tot_y_dist_rew += infos['y_dist_rew'].sum()
@@ -263,13 +280,14 @@ class Runner:
                     if 'curriculum/distribution' in infos:
                         distribution = infos['curriculum/distribution']
 
-                env_dones = 100 * tot_success / num_traj
+                num_failures = torch.logical_not(failures).to(dtype=torch.float).sum()
+                success_rate = 100 * num_success / (num_success+num_failures)
                 ep_rewards_mean = tot_rew / num_traj
                 ep_y_dist_rews_mean = tot_y_dist_rew / num_traj
                 ep_wall_dist_rews_mean = tot_wall_dist_rew / num_traj
                 ep_goal_rews_mean = tot_goal_rew / num_traj
 
-                total_dones.append(env_dones)
+                total_dones.append(success_rate)
                 total_rews_buf.append(ep_rewards_mean)
                 y_dist_rews_buf.append(ep_y_dist_rews_mean)
                 wall_dist_rews_buf.append(ep_wall_dist_rews_mean)
@@ -284,11 +302,16 @@ class Runner:
                 # self.alg.compute_returns(obs_history[:num_train_envs], privileged_obs[:num_train_envs])
                 self.alg.compute_returns(obs_history_vel[:num_train_envs])
 
-            print(f'\n\nSuccess Rates: {env_dones}%')
+                if it == self.last_recording_it and frames is None:
+                    frames = self.env.get_complete_frames() or self.env.video_frames
+
+                self.env.reset()
+
+            print(f'\n\nSuccess Rates: {success_rate}%')
             print(f'Reward Means: {ep_rewards_mean}')
-            print(f'Y Dist Rews: {ep_y_dist_rews_mean}')
-            print(f'Wall Dist Rews: {ep_wall_dist_rews_mean}')
-            print(f'Goal Rews: {ep_goal_rews_mean}')
+            print(f'\tY Dist Rews: {ep_y_dist_rews_mean}')
+            print(f'\tWall Dist Rews: {ep_wall_dist_rews_mean}')
+            print(f'\tGoal Rews: {ep_goal_rews_mean}')
             print(f'Num Trajectories: {num_traj}')
 
             if it == 0:
@@ -297,8 +320,8 @@ class Runner:
 
             if (it + 1) % 30:
                 with open(os.path.join(model_root_path, 'success_rate.txt'), 'a') as f:
-                    for env_dones, total_rew, y_dist_rew, wall_dist_rew, ep_goal_rew, num_traj in zip(total_dones, total_rews_buf, y_dist_rews_buf, wall_dist_rews_buf, ep_goal_rews_buf, num_traj_buf):
-                        f.write(f'{env_dones},\t\t{total_rew},\t\t{y_dist_rew},\t\t{wall_dist_rew},\t\t{ep_goal_rew}, \t\t{num_traj}\n')
+                    for success_rate, total_rew, y_dist_rew, wall_dist_rew, ep_goal_rew, num_traj in zip(total_dones, total_rews_buf, y_dist_rews_buf, wall_dist_rews_buf, ep_goal_rews_buf, num_traj_buf):
+                        f.write(f'{success_rate},\t\t{total_rew},\t\t{y_dist_rew},\t\t{wall_dist_rew},\t\t{ep_goal_rew}, \t\t{num_traj}\n')
 
                 total_dones = []
                 total_rews_buf = []
@@ -333,8 +356,6 @@ class Runner:
                 mean_adaptation_module_test_loss=mean_adaptation_module_test_loss
             )
 
-            if RunnerArgs.save_video_interval:
-                self.log_video(it)
 
             self.tot_timesteps += self.num_steps_per_env * self.env.num_envs
             if logger.every(RunnerArgs.log_freq, "iteration", start_on=1):
@@ -362,10 +383,30 @@ class Runner:
                     traced_script_body_module = torch.jit.script(body_model)
                     traced_script_body_module.save(body_path)
 
-                    # logger.upload_file(file_path=adaptation_module_path, target_path=f"checkpoints/", once=False)
                     logger.upload_file(file_path=body_path, target_path=f"checkpoints/", once=False)
+            
+
+
+            if it > RunnerArgs.min_best_eval_it and (it >= last_max_success_rate_it + RunnerArgs.min_duration_for_best_eval or success_rate > max_success_rate + RunnerArgs.success_rate_increase_threshold) and success_rate > max_success_rate:
+                body_path = f'{path}/body_best.jit'
+                body_model = copy.deepcopy(self.alg.actor_critic.actor_body).to('cpu')
+                traced_script_body_module = torch.jit.script(body_model)
+                traced_script_body_module.save(body_path)
+
+                logger.upload_file(file_path=body_path, target_path=f"checkpoints/", once=False)
+
+                max_success_rate = success_rate
+                last_max_success_rate_it = it
 
             self.current_learning_iteration += num_learning_iterations
+
+            
+            if RunnerArgs.save_video_interval:
+                if (it + 1) % RunnerArgs.save_video_interval == 0:
+                    self.start_video_recording(it + 1)
+                
+                if it == self.last_recording_it:
+                    self.log_video(it, frames)
 
         with logger.Sync():
             logger.torch_save(self.alg.actor_critic.state_dict(), f"checkpoints/ac_weights_{it:06d}.pt")
@@ -389,27 +430,21 @@ class Runner:
             logger.upload_file(file_path=adaptation_module_path, target_path=f"checkpoints/", once=False)
             logger.upload_file(file_path=body_path, target_path=f"checkpoints/", once=False)
 
+        
 
-    def log_video(self, it):
-        if it - self.last_recording_it >= RunnerArgs.save_video_interval:
-            self.env.start_recording()
-            if self.env.num_eval_envs > 0:
-                self.env.start_recording_eval()
-            print("START RECORDING")
-            self.last_recording_it = it
+    def start_video_recording(self, it):
+        self.env.start_recording()
+        self.env.complete_video_frames = []
+        if self.env.num_eval_envs > 0:
+            self.env.start_recording_eval()
+        print("START RECORDING")
+        self.last_recording_it = it
 
-        frames = self.env.get_complete_frames()
+    def log_video(self, it, frames):
         if len(frames) > 0:
-            print('pausing 2')
             self.env.pause_recording()
             print("LOGGING VIDEO")
             logger.save_video(frames, f"videos/{it:05d}.mp4", fps=1 / self.env.dt)
 
-        if self.env.num_eval_envs > 0:
-            frames = self.env.get_complete_frames_eval()
-            if len(frames) > 0:
-                self.env.pause_recording_eval()
-                print("LOGGING EVAL VIDEO")
-                logger.save_video(frames, f"videos/{it:05d}_eval.mp4", fps=1 / self.env.dt)
 
                 

@@ -167,7 +167,11 @@ class World(BaseTask):
         #     self.reset_buf = torch.logical_or(self.body_height_buf, self.reset_buf)
 
     def convert_vel_to_action(self, vel, obs_hist, env_ids=None):
-        vel = torch.clip(vel.to(self.device), min=torch.tensor([-0.5, -0.5, -0.5]).to(self.device), max=torch.tensor([0.5, 0.5, 0.5]).to(self.device))
+        if self.random_init:
+            clipped_vel = torch.clip(vel.to(self.device), min=torch.tensor([-3, -3, -np.pi]).to(self.device), max=torch.tensor([3, 3, np.pi]).to(self.device))
+            vel = clipped_vel
+        else:
+            vel = torch.clip(vel.to(self.device), min=torch.tensor([-2, -2, -0.5]).to(self.device), max=torch.tensor([2, 2, 0.5]).to(self.device))
         if env_ids is None:
             env_ids = [0]
 
@@ -316,47 +320,53 @@ class World(BaseTask):
             Calls each reward function which had a non-zero scale (processed in self._prepare_reward_function())
             adds each terms to the episode sums and to the total reward
         """
-        x_pos = self.root_states[self.robot_actor_idxs, 0].cpu() - self.env_origins[:, 0].cpu()
-        y_pos = self.root_states[self.robot_actor_idxs, 1].cpu() - self.env_origins[:, 1].cpu()
+        x_pos = self.root_states[self.robot_actor_idxs, 0] - self.env_origins[:, 0]
+        y_pos = self.root_states[self.robot_actor_idxs, 1] - self.env_origins[:, 1]
 
-        velocities = np.vstack([
-            self.root_states[self.robot_actor_idxs, 7].cpu().detach().numpy(),
-            self.root_states[self.robot_actor_idxs, 8].cpu().detach().numpy(),
-            self.root_states[self.robot_actor_idxs, 12].cpu().detach().numpy(),
-        ]).T
-
-        success_indices = np.where(y_pos >= 1.5)
-
-        indices_to_update = np.where(y_pos < 1.5)
+        success_indices = torch.where(y_pos >= 1.5)
 
         self.rew_buf[:] = 0.
         self.rew_buf_pos[:] = 0.
         self.rew_buf_neg[:] = 0.
 
-        rewards = torch.zeros_like(y_pos)
-        goal_reward = torch.zeros_like(y_pos)
+        goal_reward = torch.zeros_like(y_pos).to(self.device)
 
-        rewards[success_indices] = 100
-        goal_reward[success_indices] = 100
+        goal_reward[success_indices] = 1000
 
-        y_dist = 1.5 - y_pos
-        closest_wall_dist = torch.tensor(np.min(np.vstack([
-            np.abs(y_pos + 2),
-            np.abs(x_pos - 1),
-            np.abs(x_pos + 1),
-        ]), axis = 0))
+        goal_dist = torch.abs(1.5 - y_pos)
 
-        # closest_wall_dist = (torch.abs(y_pos + 2) + torch.abs(x_pos - 1) + torch.abs(x_pos + 1))/3
 
-        closest_wall_dist[success_indices] = 0
+        if self.random_init: 
+            goal_dist_rew = -0.025 * torch.exp(goal_dist)
+        else: goal_dist_rew = -goal_dist
 
-        rewards[indices_to_update] = - y_dist[indices_to_update] + closest_wall_dist[indices_to_update]
+        goal_dist_rew[success_indices] = 0
+            
+        if self.random_init:
+            wall_distances = torch.stack([
+                torch.abs(y_pos + 2),
+                torch.abs(x_pos - 1),
+                torch.abs(x_pos + 1),
+            ])
 
-        self.y_dist_rew = -y_dist.to(self.device)
-        self.closest_wall_dist_rew = closest_wall_dist.to(self.device)
+            closest_wall_dist = torch.min(wall_distances, axis=0).values
+
+            wall_rew = -25/(closest_wall_dist + 10)
+
+        else: wall_rew = -torch.zeros_like(x_pos).to(self.device)
+        
+        wall_rew[success_indices] = 0
+
+        rewards = goal_dist_rew + wall_rew
+
+
+        rewards[success_indices] = goal_reward[success_indices]
+
+        self.y_dist_rew = goal_dist_rew.to(self.device)
+        self.closest_wall_dist_rew = wall_rew.to(self.device)
         self.goal_rew = goal_reward.to(self.device)
 
-        self.rew_buf = rewards.to(self.device)
+        self.rew_buf = rewards
 
     def compute_observations(self):
         """ Computes observations
@@ -546,9 +556,9 @@ class World(BaseTask):
         base_ang_vel_y = self.base_ang_vel[:, 1]
         base_ang_vel_z = self.base_ang_vel[:, 2]
         orientations = self.base_quat.cpu()
-        orientations = torch.tensor(R.from_quat(orientations).as_euler('zyx')[:, 0]).to(self.device)
+        yaw_orientations = torch.tensor(R.from_quat(orientations).as_euler('zyx')[:, 0]).to(self.device)
         # build obs_vel, input for velocity network
-        self.obs_vel = torch.vstack((base_pos_x, base_pos_y, orientations, base_lin_vel_x, base_lin_vel_y, base_ang_vel_x, base_ang_vel_y, base_ang_vel_z)).T
+        self.obs_vel = torch.vstack((base_pos_x, base_pos_y, yaw_orientations, base_lin_vel_x, base_lin_vel_y, base_ang_vel_x, base_ang_vel_y, base_ang_vel_z)).T
 
     def create_sim(self):
         """ Creates simulation, terrain and evironments
@@ -874,7 +884,7 @@ class World(BaseTask):
         if self.custom_origins:
             if self.random_init:
                 self.root_states[robot_env_ids, 0:1] = torch_rand_float(-0.5, 0.5, (len(robot_env_ids), 1), device=self.device)
-                self.root_states[robot_env_ids, 1:2] = torch_rand_float(0, 0.8, (len(robot_env_ids), 1), device=self.device)
+                self.root_states[robot_env_ids, 1:2] = torch_rand_float(-1.5, -0.7, (len(robot_env_ids), 1), device=self.device)
             else:
                 self.root_states[robot_env_ids] = self.base_init_state
 
@@ -884,7 +894,7 @@ class World(BaseTask):
         else:
             if self.random_init:
                 self.root_states[robot_env_ids, 0:1] = torch_rand_float(-0.5, 0.5, (len(robot_env_ids), 1), device=self.device)
-                self.root_states[robot_env_ids, 1:2] = torch_rand_float(0, 0.8, (len(robot_env_ids), 1), device=self.device)
+                self.root_states[robot_env_ids, 1:2] = torch_rand_float(-1.5, -0.7, (len(robot_env_ids), 1), device=self.device)
             else:
                 self.root_states[robot_env_ids] = self.base_init_state
 
@@ -898,9 +908,6 @@ class World(BaseTask):
             quat = quat_from_angle_axis(init_yaws, torch.Tensor([0, 0, 1]).to(self.device))[:, 0, :]
             self.root_states[env_ids, 3:7] = quat
 
-        # base velocities
-        # self.root_states[env_ids, 7:13] = torch_rand_float(-0.5, 0.5, (len(robot_env_ids), 6),
-                                                        #    device=self.device)  # [7:10]: lin vel, [10:13]: ang vel
         robot_env_ids_int32 = robot_env_ids.to(dtype=torch.int32)
         self.gym.set_actor_root_state_tensor_indexed(self.sim, gymtorch.unwrap_tensor(self.root_states),gymtorch.unwrap_tensor(robot_env_ids_int32), len(robot_env_ids_int32))
 
@@ -928,7 +935,7 @@ class World(BaseTask):
         Returns:
             [torch.Tensor]: Vector of scales used to multiply a uniform distribution in [-1, 1]
         """
-        # noise_vec = torch.zeros_like(self.obs_buf[0])
+
         self.add_noise = self.cfg.noise.add_noise
         noise_scales = self.cfg.noise_scales
         noise_level = self.cfg.noise.noise_level
@@ -1507,9 +1514,6 @@ class World(BaseTask):
 
     def render(self, mode="rgb_array"):
         assert mode == "rgb_array"
-        bx, by, bz = self.root_states[0, 0], self.root_states[0, 1], self.root_states[0, 2]
-        self.gym.set_camera_location(self.rendering_camera, self.envs[0], gymapi.Vec3(bx, by - 1.0, bz + 1.0),
-                                     gymapi.Vec3(bx, by, bz))
         self.gym.step_graphics(self.sim)
         self.gym.render_all_camera_sensors(self.sim)
         img = self.gym.get_camera_image(self.sim, self.envs[0], self.rendering_camera, gymapi.IMAGE_COLOR)
@@ -1517,23 +1521,18 @@ class World(BaseTask):
         return img.reshape([w, h // 4, 4])
 
     def _render_headless(self):
-        if self.record_now and self.complete_video_frames is not None and len(self.complete_video_frames) == 0:
+        if self.record_now:
             bx, by, bz = self.root_states[self.robot_actor_idxs[0], 0], self.root_states[self.robot_actor_idxs[0], 1], self.root_states[self.robot_actor_idxs[0], 2]
-            self.gym.set_camera_location(self.rendering_camera, self.envs[0], gymapi.Vec3(bx, by - 1.0, bz + 1.0),
-                                         gymapi.Vec3(bx, by, bz))
-            self.video_frame = self.gym.get_camera_image(self.sim, self.envs[0], self.rendering_camera,
-                                                         gymapi.IMAGE_COLOR)
+            self.video_frame = self.gym.get_camera_image(self.sim, self.envs[0], self.rendering_camera, gymapi.IMAGE_COLOR)
             self.video_frame = self.video_frame.reshape((self.camera_props.height, self.camera_props.width, 4))
             self.video_frames.append(self.video_frame)
+            
 
         if self.record_eval_now and self.complete_video_frames_eval is not None and len(
                 self.complete_video_frames_eval) == 0:
             if self.eval_cfg is not None:
                 bx, by, bz = self.root_states[self.num_train_envs, 0], self.root_states[self.num_train_envs, 1], \
                              self.root_states[self.num_train_envs, 2]
-                self.gym.set_camera_location(self.rendering_camera_eval, self.envs[self.num_train_envs],
-                                             gymapi.Vec3(bx, by - 1.0, bz + 1.0),
-                                             gymapi.Vec3(bx, by, bz))
                 self.video_frame_eval = self.gym.get_camera_image(self.sim, self.envs[self.num_train_envs],
                                                                   self.rendering_camera_eval,
                                                                   gymapi.IMAGE_COLOR)

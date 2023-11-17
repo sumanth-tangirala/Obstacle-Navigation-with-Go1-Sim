@@ -28,7 +28,7 @@ def load_policy(logdir):
 def train_go1(headless=True):
 
 
-    from go1_gym.envs.base.legged_robot_config import Cfg
+    from go1_gym.envs.base.world_config import Cfg
     from go1_gym.envs.go1.go1_config import config_go1
     from go1_gym.envs.go1.obstacle_avoidance import ObstacleAvoidance
 
@@ -236,7 +236,7 @@ def train_go1(headless=True):
       headless=headless, 
       cfg=Cfg, 
       torque_policy=torque_policy, 
-      random_init=False
+      random_init=True
     )
 
     # log the experiment parameters

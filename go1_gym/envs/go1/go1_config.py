@@ -2,7 +2,7 @@ from typing import Union
 
 from params_proto import Meta
 
-from go1_gym.envs.base.legged_robot_config import Cfg
+from go1_gym.envs.base.world_config import Cfg
 
 
 def config_go1(Cnfg: Union[Cfg, Meta]):
@@ -69,7 +69,7 @@ def config_go1(Cnfg: Union[Cfg, Meta]):
     _ = Cnfg.env
     _.num_observations = 42
     _.observe_vel = False
-    _.num_envs = 4000
+    _.num_envs = 2000
 
     _ = Cnfg.commands
     _.lin_vel_x = [-.5, .5]

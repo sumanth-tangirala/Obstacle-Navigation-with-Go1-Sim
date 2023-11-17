@@ -13,11 +13,14 @@ import os
 import pickle as pkl
 
 from go1_gym.envs import *
-from go1_gym.envs.base.legged_robot_config import Cfg
+from go1_gym.envs.base.world_config import Cfg
 from go1_gym.envs.go1.go1_config import config_go1
 from go1_gym.envs.go1.velocity_tracking import VelocityTrackingEasyEnv
 
 from tqdm import tqdm
+
+load_label = "/common/home/st1122/Projects/walk-these-ways/runs/gait-conditioned-agility/static_init_velocity"
+should_random_init = True
 
 def load_torque_policy(logdir):
     body = torch.jit.load(logdir + '/checkpoints/body_latest.jit')
@@ -37,7 +40,7 @@ def load_torque_policy(logdir):
     return policy
 
 def load_velocity_policy(logdir):
-    body = torch.jit.load(logdir + '/checkpoints/body_latest.jit')
+    body = torch.jit.load(logdir + '/checkpoints/body_best.jit')
 
     def policy(obs, info={}):
         """
@@ -53,7 +56,7 @@ def load_velocity_policy(logdir):
     return policy
 
 
-def load_env(label, headless):
+def load_env(label, headless, random_init):
     try:
         contents = os.listdir(label)
     except:
@@ -117,7 +120,7 @@ def load_env(label, headless):
         headless=headless, 
         cfg=Cfg, 
         torque_policy=torque_policy, 
-        random_init=False,
+        random_init=random_init,
     )
     env = HistoryWrapper(env)
 
@@ -132,9 +135,7 @@ def play_go1(headless=True):
     import glob
     import os
 
-    label = "/common/home/st1122/Projects/walk-these-ways/runs/gait-conditioned-agility/2023-11-13/train/234829.495325"
-
-    env, vel_policy = load_env(label, headless)
+    env, vel_policy = load_env(load_label, headless, random_init=should_random_init)
 
     num_eval_steps = 750
 
