@@ -1,5 +1,6 @@
 # License: see [LICENSE, LICENSES/legged_gym/LICENSE]
 
+import numpy as np
 from params_proto import PrefixProto, ParamsProto
 
 
@@ -10,12 +11,15 @@ class Cfg(PrefixProto, cli=False):
         num_scalar_observations = 42
         # if not None a privilige_obs_buf will be returned by step() (critic obs for assymetric training). None is returned otherwise
         num_privileged_obs = 18
-        num_obs_vel = 8
+        num_obs_vel = 6
         privileged_future_horizon = 1
         num_actions = 12
         num_actions_vel = 3
         num_observation_history = 15
         num_observation_history_vel = 15
+
+        lin_vel_clip = 2
+        ang_vel_clip = np.pi
     
         env_spacing = 5.  # not used with heightfields/trimeshes
         send_timeouts = True  # send time out information to the algorithm
@@ -297,6 +301,21 @@ class Cfg(PrefixProto, cli=False):
         gait_force_sigma = 50.
         gait_vel_sigma = 0.5
         footswing_height = 0.09
+
+        # velocity policy rewards
+        goal_reach = 10
+
+        goal_dist_scale = 0.01
+
+        wall_dist_scale = 0.0005
+        wall_dist_epsilon = 0.01
+        wall_dist_pow = 4
+
+        vel_dir_scale = 0.03
+        vel_dir_pow = 0.5
+        vel_dir_offset = 0.1
+        vel_static_cost = 0
+
 
     class reward_scales(ParamsProto, cli=False):
         termination = -0.0

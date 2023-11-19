@@ -3,6 +3,7 @@
 import os
 from typing import Dict
 import numpy as np
+
 from go1_gym_learn import env
 
 from isaacgym import gymtorch, gymapi, gymutil
@@ -134,6 +135,7 @@ class World(BaseTask):
         self.extras['y_dist_rew'] = self.y_dist_rew.clone()
         self.extras['closest_wall_dist_rew'] = self.closest_wall_dist_rew.clone()
         self.extras['goal_rew'] = self.goal_rew.clone()
+        self.extras['vel_dir_rew'] = self.vel_dir_rew.clone()
 
         self.reset_idx(env_ids)
         self.compute_observations()
@@ -168,7 +170,7 @@ class World(BaseTask):
 
     def convert_vel_to_action(self, vel, obs_hist, env_ids=None):
         if self.random_init:
-            clipped_vel = torch.clip(vel.to(self.device), min=torch.tensor([-3, -3, -np.pi]).to(self.device), max=torch.tensor([3, 3, np.pi]).to(self.device))
+            clipped_vel = torch.clip(vel.to(self.device), min=torch.tensor([-self.cfg.env.lin_vel_clip, -self.cfg.env.lin_vel_clip, -self.cfg.env.ang_vel_clip]).to(self.device), max=torch.tensor([self.cfg.env.lin_vel_clip, self.cfg.env.lin_vel_clip, self.cfg.env.ang_vel_clip]).to(self.device))
             vel = clipped_vel
         else:
             vel = torch.clip(vel.to(self.device), min=torch.tensor([-2, -2, -0.5]).to(self.device), max=torch.tensor([2, 2, 0.5]).to(self.device))
@@ -220,6 +222,7 @@ class World(BaseTask):
         self.y_dist_rew[env_ids] = 0.
         self.closest_wall_dist_rew[env_ids] = 0.
         self.goal_rew[env_ids] = 0.
+        self.vel_dir_rew[env_ids] = 0.
 
         # reset robot states
         if self.cfg.domain_rand.randomize_rigids_after_start:
@@ -323,25 +326,42 @@ class World(BaseTask):
         x_pos = self.root_states[self.robot_actor_idxs, 0] - self.env_origins[:, 0]
         y_pos = self.root_states[self.robot_actor_idxs, 1] - self.env_origins[:, 1]
 
+        base_lin_vel_x = self.commands[:, 0]
+        base_lin_vel_y = self.commands[:, 1]
+
+        vels = torch.vstack([base_lin_vel_x, base_lin_vel_y]).T
+        vel_norms = torch.norm(vels, dim=1)
+
+        orientations = self.base_quat.cpu()
+        yaws = torch.tensor(R.from_quat(orientations).as_euler('zyx')[:, 0]).to(self.device)
+
+        cos = torch.cos(yaws)
+        sin = torch.sin(yaws)
+
+        inv_rot = torch.stack([torch.stack([cos, sin], dim=1), torch.stack([-sin, cos], dim=1)], dim=1).to(dtype=torch.float32)
+
+        vels = torch.matmul(inv_rot, vels.unsqueeze(2)).squeeze(2)
+        vels[:, 1] = -vels[:, 1]
+
+        target_vel = torch.tensor([0., 1.]).to(self.device)
+
         success_indices = torch.where(y_pos >= 1.5)
+        static_indices = torch.where(vel_norms < 0.01)
 
-        self.rew_buf[:] = 0.
-        self.rew_buf_pos[:] = 0.
-        self.rew_buf_neg[:] = 0.
-
+        # Goal Reward
         goal_reward = torch.zeros_like(y_pos).to(self.device)
+        goal_reward[success_indices] = self.cfg.rewards.goal_reach
 
-        goal_reward[success_indices] = 1000
-
+        # Goal Distance Reward
         goal_dist = torch.abs(1.5 - y_pos)
 
-
         if self.random_init: 
-            goal_dist_rew = -0.025 * torch.exp(goal_dist)
+            goal_dist_rew = -goal_dist * self.cfg.rewards.goal_dist_scale
         else: goal_dist_rew = -goal_dist
 
         goal_dist_rew[success_indices] = 0
             
+        # Wall Distance Reward
         if self.random_init:
             wall_distances = torch.stack([
                 torch.abs(y_pos + 2),
@@ -351,20 +371,28 @@ class World(BaseTask):
 
             closest_wall_dist = torch.min(wall_distances, axis=0).values
 
-            wall_rew = -25/(closest_wall_dist + 10)
+            wall_rew = -self.cfg.rewards.wall_dist_scale/(torch.pow(closest_wall_dist, self.cfg.rewards.wall_dist_pow) + self.cfg.rewards.wall_dist_epsilon)
 
         else: wall_rew = -torch.zeros_like(x_pos).to(self.device)
         
         wall_rew[success_indices] = 0
 
-        rewards = goal_dist_rew + wall_rew
+        # Velocity Orientation Reward
+        if self.random_init:
+            vel_norms = torch.stack([vel_norms, vel_norms], dim=1)
+            vel_dir_rew = - self.cfg.rewards.vel_dir_scale * (torch.pow(torch.abs(torch.matmul(vels/vel_norms, target_vel) - 1), self.cfg.rewards.vel_dir_pow) - self.cfg.rewards.vel_dir_offset)
+            vel_dir_rew[static_indices] = self.cfg.rewards.vel_static_cost
+        else:
+            vel_dir_rew = torch.zeros_like(x_pos)
 
-
+        # Reward Accumulation
+        rewards = goal_dist_rew + wall_rew + vel_dir_rew
         rewards[success_indices] = goal_reward[success_indices]
 
-        self.y_dist_rew = goal_dist_rew.to(self.device)
-        self.closest_wall_dist_rew = wall_rew.to(self.device)
-        self.goal_rew = goal_reward.to(self.device)
+        self.y_dist_rew = goal_dist_rew
+        self.closest_wall_dist_rew = wall_rew
+        self.goal_rew = goal_reward
+        self.vel_dir_rew = vel_dir_rew
 
         self.rew_buf = rewards
 
@@ -558,7 +586,11 @@ class World(BaseTask):
         orientations = self.base_quat.cpu()
         yaw_orientations = torch.tensor(R.from_quat(orientations).as_euler('zyx')[:, 0]).to(self.device)
         # build obs_vel, input for velocity network
-        self.obs_vel = torch.vstack((base_pos_x, base_pos_y, yaw_orientations, base_lin_vel_x, base_lin_vel_y, base_ang_vel_x, base_ang_vel_y, base_ang_vel_z)).T
+
+        if self.random_init:
+            self.obs_vel = torch.vstack((base_pos_x, base_pos_y, yaw_orientations, base_lin_vel_x, base_lin_vel_y, base_ang_vel_x)).T
+        else:
+            self.obs_vel = torch.vstack((base_pos_x, base_pos_y, yaw_orientations, base_lin_vel_x, base_lin_vel_y, base_ang_vel_x, base_ang_vel_y, base_ang_vel_z)).T
 
     def create_sim(self):
         """ Creates simulation, terrain and evironments
@@ -902,6 +934,7 @@ class World(BaseTask):
 
         # base yaws
         if self.random_init:
+            init_yaws = torch.zeros(len(env_ids), 1, device=self.device)
             init_yaws = torch_rand_float(-np.pi,
                                         np.pi, (len(env_ids), 1),
                                         device=self.device)
@@ -911,11 +944,9 @@ class World(BaseTask):
         robot_env_ids_int32 = robot_env_ids.to(dtype=torch.int32)
         self.gym.set_actor_root_state_tensor_indexed(self.sim, gymtorch.unwrap_tensor(self.root_states),gymtorch.unwrap_tensor(robot_env_ids_int32), len(robot_env_ids_int32))
 
-        if cfg.env.record_video and 0 in env_ids:
-            if self.complete_video_frames is None:
-                self.complete_video_frames = []
-            else:
-                self.complete_video_frames = self.video_frames[:]
+
+        if self.record_now and 0 in env_ids:
+            self.complete_video_frames = self.video_frames.copy()
             self.video_frames = []
 
         if cfg.env.record_video and self.eval_cfg is not None and self.num_train_envs in env_ids:
@@ -1541,7 +1572,7 @@ class World(BaseTask):
                 self.video_frames_eval.append(self.video_frame_eval)
 
     def start_recording(self):
-        self.complete_video_frames = None
+        self.complete_video_frames = []
         self.record_now = True
 
     def start_recording_eval(self):
@@ -1549,7 +1580,7 @@ class World(BaseTask):
         self.record_eval_now = True
 
     def pause_recording(self):
-        self.complete_video_frames = []
+        # self.complete_video_frames = []
         self.video_frames = []
         self.record_now = False
 

@@ -28,6 +28,7 @@ class HistoryWrapper(gym.Wrapper):
 
         self.obs_history = torch.cat((self.obs_history[:, self.env.num_obs:], obs), dim=-1)
         self.obs_history_vel = torch.cat((self.obs_history_vel[:, self.env.num_obs_vel:], obs_vel), dim=-1)
+        self.complete_video_frames = self.env.complete_video_frames
         return {'obs': obs, 'obs_vel': obs_vel, 'privileged_obs': privileged_obs, 'obs_history': self.obs_history, 'obs_history_vel': self.obs_history_vel}, rew, done, info
 
     def get_observations(self):

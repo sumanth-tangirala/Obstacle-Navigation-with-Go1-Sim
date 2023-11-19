@@ -174,6 +174,7 @@ class Runner:
         y_dist_rews_buf = []
         wall_dist_rews_buf = []
         ep_goal_rews_buf = []
+        ep_vel_dir_rews_buf = []
         num_traj_buf = []
         max_success_rate = 0
         last_max_success_rate_it = 0
@@ -191,6 +192,7 @@ class Runner:
             tot_y_dist_rew = 0
             tot_wall_dist_rew = 0
             tot_goal_rew = 0
+            tot_vel_dir_rew = 0
             num_traj = self.env.num_envs
             num_new_traj = 0
             frames = None
@@ -229,6 +231,7 @@ class Runner:
                     tot_y_dist_rew += infos['y_dist_rew'].sum()
                     tot_wall_dist_rew += infos['closest_wall_dist_rew'].sum()
                     tot_goal_rew += infos['goal_rew'].sum()
+                    tot_vel_dir_rew += infos['vel_dir_rew'].sum()
 
                     obs, obs_history = obs_dict["obs"], obs_dict["obs_history"]
                     obs, obs_history = obs.to(self.device), obs_history.to(self.device)
@@ -286,12 +289,15 @@ class Runner:
                 ep_y_dist_rews_mean = tot_y_dist_rew / num_traj
                 ep_wall_dist_rews_mean = tot_wall_dist_rew / num_traj
                 ep_goal_rews_mean = tot_goal_rew / num_traj
+                ep_vel_dir_rews_mean = tot_vel_dir_rew / num_traj
 
                 total_dones.append(success_rate)
                 total_rews_buf.append(ep_rewards_mean)
                 y_dist_rews_buf.append(ep_y_dist_rews_mean)
                 wall_dist_rews_buf.append(ep_wall_dist_rews_mean)
                 ep_goal_rews_buf.append(ep_goal_rews_mean)
+                ep_vel_dir_rews_buf.append(ep_vel_dir_rews_mean)
+
                 num_traj_buf.append(num_traj)
 
                 stop = time.time()
@@ -311,6 +317,7 @@ class Runner:
             print(f'Reward Means: {ep_rewards_mean}')
             print(f'\tY Dist Rews: {ep_y_dist_rews_mean}')
             print(f'\tWall Dist Rews: {ep_wall_dist_rews_mean}')
+            print(f'\tVel Dir Rews: {ep_vel_dir_rews_mean}')
             print(f'\tGoal Rews: {ep_goal_rews_mean}')
             print(f'Num Trajectories: {num_traj}')
 
@@ -320,14 +327,15 @@ class Runner:
 
             if (it + 1) % 30:
                 with open(os.path.join(model_root_path, 'success_rate.txt'), 'a') as f:
-                    for success_rate, total_rew, y_dist_rew, wall_dist_rew, ep_goal_rew, num_traj in zip(total_dones, total_rews_buf, y_dist_rews_buf, wall_dist_rews_buf, ep_goal_rews_buf, num_traj_buf):
-                        f.write(f'{success_rate},\t\t{total_rew},\t\t{y_dist_rew},\t\t{wall_dist_rew},\t\t{ep_goal_rew}, \t\t{num_traj}\n')
+                    for success_rate, total_rew, y_dist_rew, wall_dist_rew, ep_goal_rew, ep_vel_dir_rew, num_traj in zip(total_dones, total_rews_buf, y_dist_rews_buf, wall_dist_rews_buf, ep_goal_rews_buf, ep_vel_dir_rews_buf ,num_traj_buf):
+                        f.write(f'{success_rate},\t\t{total_rew},\t\t{y_dist_rew},\t\t{wall_dist_rew},\t\t{ep_vel_dir_rew},\t\t{ep_goal_rew},\t\t{num_traj}\n')
 
                 total_dones = []
                 total_rews_buf = []
                 y_dist_rews_buf = []
                 wall_dist_rews_buf = []
                 ep_goal_rews_buf = []
+                ep_vel_dir_rews_buf = []
 
             results = self.alg.update()
 

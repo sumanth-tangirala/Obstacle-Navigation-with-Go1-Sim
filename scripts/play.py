@@ -19,7 +19,7 @@ from go1_gym.envs.go1.velocity_tracking import VelocityTrackingEasyEnv
 
 from tqdm import tqdm
 
-load_label = "/common/home/st1122/Projects/walk-these-ways/runs/gait-conditioned-agility/static_init_velocity"
+load_label = "/common/home/st1122/Projects/walk-these-ways/runs/gait-conditioned-agility/2023-11-18/train/030705.545678"
 should_random_init = True
 
 def load_torque_policy(logdir):
@@ -153,9 +153,15 @@ def play_go1(headless=True):
 
         if done:
             print('Success!')
+            break
+    
+    video_frames = env.complete_video_frames
+    if len(video_frames) == 0:
+        video_frames = env.video_frames
+    if len(video_frames) == 0:
+        video_frames = env.env.video_frames
 
-
-    # logger.save_video(env.video_frames, "videos/plan.mp4", fps=1 / env.dt)
+    logger.save_video(video_frames, "videos/plan.mp4", fps=1 / env.dt)
 
 
 if __name__ == '__main__':
