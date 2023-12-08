@@ -19,8 +19,17 @@ from go1_gym.envs.go1.velocity_tracking import VelocityTrackingEasyEnv
 
 from tqdm import tqdm
 
-load_label = "/common/home/st1122/Projects/walk-these-ways/runs/gait-conditioned-agility/2023-11-18/train/030705.545678"
-should_random_init = True
+should_random_init = False
+has_obstacles = True
+
+if should_random_init:
+    load_label = "/common/home/st1122/Projects/walk-these-ways/runs/gait-conditioned-agility/2023-11-18/train/030705.545678"
+elif has_obstacles:
+    load_label = '/common/home/st1122/Projects/walk-these-ways/runs/gait-conditioned-agility/2023-12-07/train/210931.056253'
+else:
+    load_label = "/common/home/st1122/Projects/walk-these-ways/runs/gait-conditioned-agility/static_init_velocity"
+
+
 
 def load_torque_policy(logdir):
     body = torch.jit.load(logdir + '/checkpoints/body_latest.jit')
@@ -121,6 +130,7 @@ def load_env(label, headless, random_init):
         cfg=Cfg, 
         torque_policy=torque_policy, 
         random_init=random_init,
+        has_obstacles = has_obstacles
     )
     env = HistoryWrapper(env)
 

@@ -13,7 +13,7 @@ from scipy.spatial.transform import Rotation as R
 
 assert gymtorch
 import torch
-
+import random
 from go1_gym import MINI_GYM_ROOT_DIR
 from go1_gym.envs.base.base_task import BaseTask
 from go1_gym.utils.math_utils import quat_apply_yaw, wrap_to_pi, get_scale_shift
@@ -23,7 +23,7 @@ from scipy.spatial.transform import Rotation as R
 
 class World(BaseTask):
     def __init__(self, cfg: Cfg, sim_params, physics_engine, sim_device, headless, torque_policy=None, eval_cfg=None,
-                 initial_dynamics_dict=None, random_init=False):
+                 initial_dynamics_dict=None, random_init=False, has_obstacles=False):
         """ Parses the provided config file,
             calls create_sim() (which creates, simulation, terrain and environments),
             initilizes pytorch buffers used during training
@@ -43,6 +43,9 @@ class World(BaseTask):
         self.debug_viz = False
         self.init_done = False
         self.random_init = random_init
+        self.has_obstacles = has_obstacles
+        if has_obstacles:
+            self.random_init = False
         self.initial_dynamics_dict = initial_dynamics_dict
         if eval_cfg is not None: self._parse_cfg(eval_cfg)
         self._parse_cfg(self.cfg)
@@ -136,6 +139,7 @@ class World(BaseTask):
         self.extras['closest_wall_dist_rew'] = self.closest_wall_dist_rew.clone()
         self.extras['goal_rew'] = self.goal_rew.clone()
         self.extras['vel_dir_rew'] = self.vel_dir_rew.clone()
+        self.extras['contact_rew'] = self.contact_rew.clone()
 
         self.reset_idx(env_ids)
         self.compute_observations()
@@ -170,6 +174,7 @@ class World(BaseTask):
 
     def convert_vel_to_action(self, vel, obs_hist, env_ids=None):
         if self.random_init:
+
             clipped_vel = torch.clip(vel.to(self.device), min=torch.tensor([-self.cfg.env.lin_vel_clip, -self.cfg.env.lin_vel_clip, -self.cfg.env.ang_vel_clip]).to(self.device), max=torch.tensor([self.cfg.env.lin_vel_clip, self.cfg.env.lin_vel_clip, self.cfg.env.ang_vel_clip]).to(self.device))
             vel = clipped_vel
         else:
@@ -220,6 +225,7 @@ class World(BaseTask):
             return
 
         self.y_dist_rew[env_ids] = 0.
+        self.contact_rew[env_ids] = 0.
         self.closest_wall_dist_rew[env_ids] = 0.
         self.goal_rew[env_ids] = 0.
         self.vel_dir_rew[env_ids] = 0.
@@ -323,6 +329,20 @@ class World(BaseTask):
             Calls each reward function which had a non-zero scale (processed in self._prepare_reward_function())
             adds each terms to the episode sums and to the total reward
         """
+        net_contact_forces = gymtorch.wrap_tensor(self.gym.acquire_net_contact_force_tensor(self.sim))
+
+        contact_forces = torch.zeros((self.num_envs), device=self.device)
+
+        contact_forces += (
+            torch.abs(net_contact_forces[self.wall1_idxs, :2]).sum(dim=1) +
+            torch.abs(net_contact_forces[self.wall2_idxs, :2]).sum(dim=1) +
+            torch.abs(net_contact_forces[self.wall3_idxs, :2]).sum(dim=1) +
+            torch.abs(net_contact_forces[self.wall4_idxs, :2]).sum(dim=1)
+        )
+        
+        if self.has_obstacles:
+            contact_forces += torch.abs(net_contact_forces[self.obs_idxs, :2]).sum(dim=1)
+
         x_pos = self.root_states[self.robot_actor_idxs, 0] - self.env_origins[:, 0]
         y_pos = self.root_states[self.robot_actor_idxs, 1] - self.env_origins[:, 1]
 
@@ -374,25 +394,30 @@ class World(BaseTask):
             wall_rew = -self.cfg.rewards.wall_dist_scale/(torch.pow(closest_wall_dist, self.cfg.rewards.wall_dist_pow) + self.cfg.rewards.wall_dist_epsilon)
 
         else: wall_rew = -torch.zeros_like(x_pos).to(self.device)
-        
+
         wall_rew[success_indices] = 0
+
+        # Contact Reward
+        contact_rew = -self.cfg.rewards.contact_scale * contact_forces
+        contact_rew[success_indices] = 0
 
         # Velocity Orientation Reward
         if self.random_init:
             vel_norms = torch.stack([vel_norms, vel_norms], dim=1)
-            vel_dir_rew = - self.cfg.rewards.vel_dir_scale * (torch.pow(torch.abs(torch.matmul(vels/vel_norms, target_vel) - 1), self.cfg.rewards.vel_dir_pow) - self.cfg.rewards.vel_dir_offset)
+            vel_dir_rew = self.cfg.rewards.vel_dir_scale * (torch.pow(torch.abs(torch.matmul(vels/vel_norms, target_vel) - 1), self.cfg.rewards.vel_dir_pow) - self.cfg.rewards.vel_dir_offset)
             vel_dir_rew[static_indices] = self.cfg.rewards.vel_static_cost
         else:
             vel_dir_rew = torch.zeros_like(x_pos)
 
         # Reward Accumulation
-        rewards = goal_dist_rew + wall_rew + vel_dir_rew
+        rewards = goal_dist_rew + wall_rew + vel_dir_rew + contact_rew
         rewards[success_indices] = goal_reward[success_indices]
 
         self.y_dist_rew = goal_dist_rew
         self.closest_wall_dist_rew = wall_rew
         self.goal_rew = goal_reward
         self.vel_dir_rew = vel_dir_rew
+        self.contact_rew = contact_rew
 
         self.rew_buf = rewards
 
@@ -583,11 +608,16 @@ class World(BaseTask):
         base_ang_vel_x = self.base_ang_vel[:, 0]
         base_ang_vel_y = self.base_ang_vel[:, 1]
         base_ang_vel_z = self.base_ang_vel[:, 2]
+        obstacle_length = self.obs_lengths
+        obstacle_pos_x = self.obs_x_positions
+        obstacle_pos_y = self.obs_y_positions
         orientations = self.base_quat.cpu()
         yaw_orientations = torch.tensor(R.from_quat(orientations).as_euler('zyx')[:, 0]).to(self.device)
         # build obs_vel, input for velocity network
 
-        if self.random_init:
+        if self.has_obstacles:
+            self.obs_vel = torch.vstack((base_pos_x, base_pos_y, yaw_orientations, base_lin_vel_x, base_lin_vel_y, base_ang_vel_x, obstacle_pos_x, obstacle_pos_y, obstacle_length)).T
+        elif self.random_init:
             self.obs_vel = torch.vstack((base_pos_x, base_pos_y, yaw_orientations, base_lin_vel_x, base_lin_vel_y, base_ang_vel_x)).T
         else:
             self.obs_vel = torch.vstack((base_pos_x, base_pos_y, yaw_orientations, base_lin_vel_x, base_lin_vel_y, base_ang_vel_x, base_ang_vel_y, base_ang_vel_z)).T
@@ -1422,6 +1452,11 @@ class World(BaseTask):
         env_upper = gymapi.Vec3(0., 0., 0.)
         self.actor_handles = []
         self.robot_actor_idxs=[]
+        self.wall1_idxs = []
+        self.wall2_idxs = []
+        self.wall3_idxs = []
+        self.wall4_idxs = []
+        self.obs_idxs = []
         self.imu_sensor_handles = []
         self.envs = []
 
@@ -1444,9 +1479,15 @@ class World(BaseTask):
         asset_options.fix_base_link = True
         length_box_asset = self.gym.create_box(self.sim, wall_length, wall_thickness, wall_height, asset_options)
         width_box_asset = self.gym.create_box(self.sim, wall_width, wall_thickness, wall_height, asset_options)
+        
+        self.obs_x_positions = []
+        self.obs_y_positions = []
+        self.obs_lengths = []
 
 
         for i in range(self.num_envs):
+            
+
             # create env instance
             env_handle = self.gym.create_env(self.sim, env_lower, env_upper, int(np.sqrt(self.num_envs)))
             pos = self.env_origins[i].clone() - torch.Tensor([3,0, 0]).to(self.device)
@@ -1474,6 +1515,7 @@ class World(BaseTask):
             shape_props[0].restitution = 1
             shape_props[0].compliance = 0.5
             self.gym.set_actor_rigid_shape_properties(env_handle, box_handle, shape_props)
+            self.wall1_idxs.append(self.gym.get_actor_index(env_handle, box_handle, gymapi.DOMAIN_SIM))
 
             pose = gymapi.Transform()
             pose.p = gymapi.Vec3(*(self.env_origins[i, :2] + torch.Tensor([(wall_width + wall_thickness)/2, 0]).to(self.device)), wall_height/2)
@@ -1483,6 +1525,7 @@ class World(BaseTask):
             shape_props[0].restitution = 1
             shape_props[0].compliance = 0.5
             self.gym.set_actor_rigid_shape_properties(env_handle, box_handle, shape_props)
+            self.wall2_idxs.append(self.gym.get_actor_index(env_handle, box_handle, gymapi.DOMAIN_SIM))
 
             pose = gymapi.Transform()
             pose.p = gymapi.Vec3(*(self.env_origins[i, :2] - torch.Tensor([0, (wall_length + wall_thickness)/2]).to(self.device)), wall_height/2)
@@ -1492,6 +1535,7 @@ class World(BaseTask):
             shape_props[0].restitution = 1
             shape_props[0].compliance = 0.5
             self.gym.set_actor_rigid_shape_properties(env_handle, box_handle, shape_props)
+            self.wall3_idxs.append(self.gym.get_actor_index(env_handle, box_handle, gymapi.DOMAIN_SIM))
 
             pose = gymapi.Transform()
             pose.p = gymapi.Vec3(*(self.env_origins[i, :2] + torch.Tensor([0, (wall_length + wall_thickness)/2]).to(self.device)), wall_height/2)
@@ -1501,8 +1545,43 @@ class World(BaseTask):
             shape_props[0].restitution = 1
             shape_props[0].compliance = 0.5
             self.gym.set_actor_rigid_shape_properties(env_handle, box_handle, shape_props)
+            self.wall4_idxs.append(self.gym.get_actor_index(env_handle, box_handle, gymapi.DOMAIN_SIM))
+        
+            if self.has_obstacles:
+                obs_width = 0.4
+                obs_length = random.uniform(0.3, 1)
+                y_min = -1 + obs_length/2
+                y_max = 1 - obs_length/2
+                obs_y_position = random.uniform(y_min, y_max)
+                obs_x_position = random.uniform(-0.7, 1)
+                obstacle_asset = self.gym.create_box(self.sim, obs_width, obs_length, wall_height, asset_options)
+
+                pose = gymapi.Transform()
+                pose.p = gymapi.Vec3(*(self.env_origins[i, 0] + obs_y_position, self.env_origins[i, 1] + obs_x_position), wall_height / 2)
+                pose.r = gymapi.Quat.from_euler_zyx(0, 0, np.pi/2)
+                box_handle = self.gym.create_actor(env_handle, obstacle_asset, pose, "box", i, 0)
+                shape_props = self.gym.get_actor_rigid_shape_properties(env_handle, box_handle)
+                shape_props[0].restitution = 1
+                shape_props[0].compliance = 0.5
+                self.gym.set_actor_rigid_shape_properties(env_handle, box_handle, shape_props)
+                self.obs_idxs.append(self.gym.get_actor_index(env_handle, box_handle, gymapi.DOMAIN_SIM))
+
+                self.obs_y_positions.append(obs_y_position)
+                self.obs_x_positions.append(obs_x_position)
+                self.obs_lengths.append(obs_length)
+
+            
+        self.obs_lengths = torch.Tensor(self.obs_lengths).to(self.device)
+        self.obs_x_positions = torch.Tensor(self.obs_x_positions).to(self.device)
+        self.obs_y_positions = torch.Tensor(self.obs_y_positions).to(self.device)
 
         self.robot_actor_idxs = torch.Tensor(self.robot_actor_idxs).to(device=self.device,dtype=torch.long)
+        self.wall1_idxs = torch.Tensor(self.wall1_idxs).to(device=self.device,dtype=torch.long)
+        self.wall2_idxs = torch.Tensor(self.wall2_idxs).to(device=self.device,dtype=torch.long)
+        self.wall3_idxs = torch.Tensor(self.wall3_idxs).to(device=self.device,dtype=torch.long)
+        self.wall4_idxs = torch.Tensor(self.wall4_idxs).to(device=self.device,dtype=torch.long)
+        self.obs_idxs = torch.Tensor(self.obs_idxs).to(device=self.device,dtype=torch.long)
+
         print("Number of robot actors: ", len(self.robot_actor_idxs))
 
         self.feet_indices = torch.zeros(len(feet_names), dtype=torch.long, device=self.device, requires_grad=False)

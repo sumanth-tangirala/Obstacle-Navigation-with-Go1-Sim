@@ -11,14 +11,14 @@ class Cfg(PrefixProto, cli=False):
         num_scalar_observations = 42
         # if not None a privilige_obs_buf will be returned by step() (critic obs for assymetric training). None is returned otherwise
         num_privileged_obs = 18
-        num_obs_vel = 6
+        num_obs_vel = 9
         privileged_future_horizon = 1
         num_actions = 12
         num_actions_vel = 3
         num_observation_history = 15
         num_observation_history_vel = 15
 
-        lin_vel_clip = 2
+        lin_vel_clip = 0.5
         ang_vel_clip = np.pi
     
         env_spacing = 5.  # not used with heightfields/trimeshes
@@ -315,6 +315,8 @@ class Cfg(PrefixProto, cli=False):
         vel_dir_pow = 0.5
         vel_dir_offset = 0.1
         vel_static_cost = 0
+
+        contact_scale = 0.1
 
 
     class reward_scales(ParamsProto, cli=False):

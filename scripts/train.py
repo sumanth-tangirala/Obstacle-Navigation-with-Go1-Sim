@@ -236,7 +236,8 @@ def train_go1(headless=True):
       headless=headless, 
       cfg=Cfg, 
       torque_policy=torque_policy, 
-      random_init=True
+      random_init=False,
+      has_obstacles =True
     )
 
     # log the experiment parameters

@@ -9,14 +9,14 @@ from go1_gym.envs.base.world_config import Cfg
 
 class ObstacleAvoidance(World):
     def __init__(self, sim_device, headless, torque_policy=None, num_envs=None, prone=False, deploy=False,
-                 cfg: Cfg = None, eval_cfg: Cfg = None, initial_dynamics_dict=None, physics_engine="SIM_PHYSX", random_init=False):
+                 cfg: Cfg = None, eval_cfg: Cfg = None, initial_dynamics_dict=None, physics_engine="SIM_PHYSX", random_init=False, has_obstacles=False):
 
         if num_envs is not None:
             cfg.env.num_envs = num_envs
 
         sim_params = gymapi.SimParams()
         gymutil.parse_sim_config(vars(cfg.sim), sim_params)
-        super().__init__(cfg, sim_params, physics_engine, sim_device, headless, torque_policy, eval_cfg, initial_dynamics_dict, random_init=random_init)
+        super().__init__(cfg, sim_params, physics_engine, sim_device, headless, torque_policy, eval_cfg, initial_dynamics_dict, random_init=random_init, has_obstacles=has_obstacles)
 
 
     def step(self, actions):
